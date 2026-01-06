@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: core
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/main
+  cloud:
+    openfeign:
+      okhttp:
+        enabled: true
+      httpclient:
+        enabled: false
+
+server:
+  port: 7778
+  error:
+    include-stacktrace: always
+
+logging:
+  level:
+    com.blinkgift.core.security: DEBUG
+    org.springframework.web: DEBUG
+    com.blinkgift.core: DEBUG
+    org.apache.coyote: DEBUG
+    org.apache.tomcat: DEBUG
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 10000
+        loggerLevel: basic
