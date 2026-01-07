@@ -8,66 +8,32 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @Document(collection = "gift_history")
 public class GiftHistoryDocument {
-
     @Id
     private String id;
-
     @Indexed
     private String collectionAddress;
-
-    // --- ВАЖНОЕ НОВОЕ ПОЛЕ ---
-    @Indexed // Индекс нужен, чтобы быстро искать историю конкретной NFT
+    @Indexed
     private String address;
-    // -------------------------
-
-    @Indexed(unique = true)
-    private String hash;
+    @Indexed
+    private String hash; // Для snapshot-событий можно генерировать уникальный хеш: snapshotId + address
 
     private String lt;
     private String name;
     private Long timestamp;
-    private String eventType; // mint, sold, transfer
 
-    // --- НОВОЕ ПОЛЕ ---
+    // Типы: putupforsale, sold, cancelsale, ...
+    // НОВЫЕ ТИПЫ: SNAPSHOT_LIST, SNAPSHOT_FINISH, SNAPSHOT_UNLIST
+    private String eventType;
+
     private Boolean isOffchain;
-    // ------------------
-
-    // Детали сделки
     private String price;
-
-    // --- НОВОЕ ПОЛЕ ---
-    private String priceNano; // Сохраняем точную цену
-    // ------------------
-
+    private String priceNano;
     private String currency;
     private String oldOwner;
     private String newOwner;
 
-    // Конструктор маппинга
-    public static GiftHistoryDocument fromDto(GetGemsItemDto dto) {
-        GiftHistoryDocument doc = new GiftHistoryDocument();
-
-        // 1. Заполняем основные поля
-        doc.setCollectionAddress(dto.getCollectionAddress());
-
-        // ВОТ ЗДЕСЬ РАНЬШЕ ТЕРЯЛСЯ АДРЕС
-        doc.setAddress(dto.getAddress());
-
-        doc.setHash(dto.getHash());
-        doc.setLt(dto.getLt());
-        doc.setName(dto.getName());
-        doc.setTimestamp(dto.getTimestamp());
-        doc.setIsOffchain(dto.isOffchain()); // Сохраняем флаг
-
-        // 2. Заполняем детали из typeData
-        if (dto.getTypeData() != null) {
-            doc.setEventType(dto.getTypeData().getType());
-            doc.setPrice(dto.getTypeData().getPrice());
-            doc.setPriceNano(dto.getTypeData().getPriceNano()); // Сохраняем нанотоны
-            doc.setCurrency(dto.getTypeData().getCurrency());
-            doc.setOldOwner(dto.getTypeData().getOldOwner());
-            doc.setNewOwner(dto.getTypeData().getNewOwner());
-        }
-        return doc;
-    }
+    // --- НОВОЕ ПОЛЕ ---
+    @Indexed
+    private String snapshotId;
+    // ------------------
 }
