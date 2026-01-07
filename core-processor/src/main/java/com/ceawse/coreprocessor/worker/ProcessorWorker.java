@@ -22,23 +22,24 @@ public class ProcessorWorker {
 
     private final ProcessorStateRepository stateRepository;
     private final MarketStateMachine stateMachine;
-    private final MongoTemplate mongoTemplate; // Используем Template для гибких запросов
+    private final MongoTemplate mongoTemplate;
 
     private static final String PROCESSOR_ID = "MAIN_PROCESSOR";
     private static final int BATCH_SIZE = 100;
 
-    @Scheduled(fixedDelay = 1000) // Запускаем каждую секунду
+    @Scheduled(fixedDelay = 1000)
     public void processBatch() {
-        // 1. Узнаем, где остановились
         ProcessorState state = stateRepository.findById(PROCESSOR_ID)
-                .orElse(new ProcessorState(PROCESSOR_ID, 0L));
+                .orElse(new ProcessorState(PROCESSOR_ID, 0L, null));
 
         long lastTime = state.getLastProcessedTimestamp();
+        String lastId = state.getLastProcessedId();
 
-        // 2. Читаем новые события (timestamp > lastTime), сортируем от старых к новым
         Query query = new Query();
-        query.addCriteria(Criteria.where("timestamp").gt(lastTime));
-        query.with(Sort.by(Sort.Direction.ASC, "timestamp")); // Важно: хронологический порядок!
+        // ИСПРАВЛЕНИЕ: Используем gte (больше или равно), чтобы не терять события с тем же timestamp
+        query.addCriteria(Criteria.where("timestamp").gte(lastTime));
+        // ВАЖНО: Сортируем по времени И по ID для детерминированного порядка
+        query.with(Sort.by(Sort.Direction.ASC, "timestamp", "id"));
         query.limit(BATCH_SIZE);
 
         List<GiftHistoryDocument> events = mongoTemplate.find(query, GiftHistoryDocument.class);
@@ -49,23 +50,37 @@ public class ProcessorWorker {
 
         log.debug("Processing batch of {} events...", events.size());
 
-        // 3. Применяем события
         long maxTimeInBatch = lastTime;
+        String maxIdInBatch = lastId;
+        boolean stateChanged = false;
+
         for (GiftHistoryDocument event : events) {
+            // ФИЛЬТРАЦИЯ: Пропускаем события, которые мы уже видели (тот же timestamp и id <= сохраненного)
+            if (event.getTimestamp() == lastTime && lastId != null && event.getId().compareTo(lastId) <= 0) {
+                continue;
+            }
+
             try {
                 stateMachine.applyEvent(event);
 
-                if (event.getTimestamp() > maxTimeInBatch) {
-                    maxTimeInBatch = event.getTimestamp();
-                }
+                // Обновляем курсоры текущего батча
+                maxTimeInBatch = event.getTimestamp();
+                maxIdInBatch = event.getId();
+                stateChanged = true;
             } catch (Exception e) {
                 log.error("Error processing event {}: {}", event.getId(), e.getMessage());
-                // В реальном проде тут нужна Dead Letter Queue, пока просто логируем
+                // В продакшене тут нужен Dead Letter Queue. Сейчас пропускаем событие, но двигаем курсор,
+                // чтобы не застрять вечно на одной ошибке.
+                maxTimeInBatch = event.getTimestamp();
+                maxIdInBatch = event.getId();
+                stateChanged = true;
             }
         }
 
-        // 4. Сохраняем прогресс
-        state.setLastProcessedTimestamp(maxTimeInBatch);
-        stateRepository.save(state);
+        if (stateChanged) {
+            state.setLastProcessedTimestamp(maxTimeInBatch);
+            state.setLastProcessedId(maxIdInBatch);
+            stateRepository.save(state);
+        }
     }
 }

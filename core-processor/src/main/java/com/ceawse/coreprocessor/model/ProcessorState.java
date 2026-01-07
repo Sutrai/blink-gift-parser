@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Document(collection = "processor_state")
 public class ProcessorState {
     @Id
-    private String id; // "MAIN_PROCESSOR"
-    private Long lastProcessedTimestamp; // Время последнего успешного события
+    private String id;
+    private Long lastProcessedTimestamp;
+    private String lastProcessedId;
 }

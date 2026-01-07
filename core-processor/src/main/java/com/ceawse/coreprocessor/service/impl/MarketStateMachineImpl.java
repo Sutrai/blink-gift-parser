@@ -29,7 +29,6 @@ public class MarketStateMachineImpl implements MarketStateMachine {
     @Transactional
     public void applyEvent(GiftHistoryDocument event) {
         String type = event.getEventType() != null ? event.getEventType().toUpperCase() : "UNKNOWN";
-
         switch (type) {
             case "PUTUPFORSALE":
                 handleList(event);
@@ -51,30 +50,25 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         }
     }
 
-    // --- ЛОГИКА СНАПШОТА ---
-
     private void handleSnapshotList(GiftHistoryDocument event) {
         Long priceNano = parseNano(event.getPriceNano());
-
-        // 1. Ищем существующую запись или создаем заготовку
         CurrentSaleDocument sale = currentSaleRepository.findByAddress(event.getAddress())
                 .orElse(CurrentSaleDocument.builder()
                         .address(event.getAddress())
                         .collectionAddress(event.getCollectionAddress())
-                        // Если записи не было, считаем временем листинга время снапшота (или можно null)
                         .listedAt(Instant.ofEpochMilli(event.getTimestamp()))
                         .build());
 
-        // 2. Обновляем данные на актуальные из API
         sale.setName(event.getName());
         sale.setPrice(event.getPrice());
         sale.setPriceNano(priceNano);
         sale.setCurrency(event.getCurrency());
-        sale.setSeller(event.getOldOwner()); // oldOwner в snapshot_list = продавец
-        sale.setIsOffchain(Boolean.TRUE.equals(event.getIsOffchain()));
-
-        // 3. ОБНОВЛЯЕМ МЕТКУ СНАПШОТА
+        sale.setSeller(event.getOldOwner());
+        // ИСПРАВЛЕНИЕ: setIsOffchain -> setOffchain (Lombok для boolean примитива)
+        sale.setOffchain(Boolean.TRUE.equals(event.getIsOffchain()));
         sale.setLastSnapshotId(event.getSnapshotId());
+
+        // ИСПРАВЛЕНИЕ: System Time vs Blockchain Time. Для актуальности записи используем серверное время.
         sale.setUpdatedAt(Instant.now());
 
         currentSaleRepository.save(sale);
@@ -82,23 +76,28 @@ public class MarketStateMachineImpl implements MarketStateMachine {
 
     private void handleSnapshotFinish(GiftHistoryDocument event) {
         String currentSnapshotId = event.getSnapshotId();
-        log.info("Finalizing snapshot ID: {}", currentSnapshotId);
 
-        // 1. Формируем запрос на удаление
-        // Удаляем всё, где lastSnapshotId НЕ равен текущему ID снапшота.
-        // Это значит, парсер прошел по всей витрине и НЕ встретил эти товары.
+        // ИСПРАВЛЕНИЕ: Читаем время старта снапшота из priceNano
+        long snapshotStartTime = 0L;
+        try {
+            snapshotStartTime = Long.parseLong(event.getPriceNano());
+        } catch (NumberFormatException e) {
+            log.error("Invalid snapshot start time in priceNano: {}", event.getPriceNano());
+            return; // Небезопасно удалять, если нет метки времени
+        }
+
+        Instant safeThreshold = Instant.ofEpochMilli(snapshotStartTime);
+        log.info("Finalizing snapshot ID: {}. Threshold: {}", currentSnapshotId, safeThreshold);
+
         Query query = new Query();
+        // Удаляем только если ID снапшота старый (или null)
         query.addCriteria(Criteria.where("lastSnapshotId").ne(currentSnapshotId));
+        // И ГЛАВНОЕ: Удаляем только если запись не обновлялась с момента начала снапшота (Realtime не трогал её)
+        query.addCriteria(Criteria.where("updatedAt").lt(safeThreshold));
 
-        // В будущем здесь нужен будет addCriteria(Criteria.where("marketplace").is("getgems"));
-
-        // 2. Выполняем удаление
         var result = mongoTemplate.remove(query, CurrentSaleDocument.class);
-
         log.info("Snapshot finalized. Removed {} stale listings.", result.getDeletedCount());
     }
-
-    // --- ОБЫЧНАЯ ЛОГИКА (LIVE) ---
 
     private void handleList(GiftHistoryDocument event) {
         Long priceNano = parseNano(event.getPriceNano());
@@ -107,14 +106,18 @@ public class MarketStateMachineImpl implements MarketStateMachine {
                         .address(event.getAddress())
                         .collectionAddress(event.getCollectionAddress())
                         .name(event.getName())
+                        // ИСПРАВЛЕНИЕ: setIsOffchain -> setOffchain
                         .isOffchain(Boolean.TRUE.equals(event.getIsOffchain()))
                         .listedAt(Instant.ofEpochMilli(event.getTimestamp()))
                         .build());
+
         sale.setPrice(event.getPrice());
         sale.setPriceNano(priceNano);
         sale.setCurrency(event.getCurrency());
         sale.setSeller(event.getOldOwner());
-        sale.setUpdatedAt(Instant.ofEpochMilli(event.getTimestamp()));
+        // ИСПРАВЛЕНИЕ: Обновляем дату актуализации текущим временем сервера
+        sale.setUpdatedAt(Instant.now());
+
         currentSaleRepository.save(sale);
     }
 

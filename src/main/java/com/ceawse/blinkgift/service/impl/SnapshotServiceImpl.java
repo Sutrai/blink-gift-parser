@@ -26,21 +26,21 @@ public class SnapshotServiceImpl {
     @Async
     public void runSnapshot(String marketplace) {
         String snapshotId = UUID.randomUUID().toString();
+        // ИСПРАВЛЕНИЕ: Засекаем время начала
+        long startTime = System.currentTimeMillis();
+
         log.info("Starting SNAPSHOT id={} for {}", snapshotId, marketplace);
 
         try {
-            // 1. Берем коллекции из индексера
             var collections = indexerClient.getCollections();
             log.info("Collections to scan: {}", collections.size());
 
-            // 2. Сканируем каждую коллекцию
             for (var col : collections) {
                 processCollection(col.address, snapshotId);
             }
 
-            // 3. Отправляем событие завершения
-            finishSnapshot(snapshotId);
-
+            // ИСПРАВЛЕНИЕ: Передаем время старта
+            finishSnapshot(snapshotId, startTime);
         } catch (Exception e) {
             log.error("Snapshot FAILED", e);
         }
@@ -52,17 +52,13 @@ public class SnapshotServiceImpl {
 
         while (hasMore) {
             try {
-                // Запрос к GetGems
                 var response = getGemsClient.getOnSale(collectionAddress, 100, cursor);
-
                 if (response == null || !response.isSuccess() || response.getResponse().getItems() == null || response.getResponse().getItems().isEmpty()) {
                     hasMore = false;
                     continue;
                 }
 
                 List<GetGemsSaleItemDto> items = response.getResponse().getItems();
-
-                // Маппим только те, у которых есть блок sale (на всякий случай)
                 List<GiftHistoryDocument> events = items.stream()
                         .filter(i -> i.getSale() != null)
                         .map(i -> mapToEvent(i, snapshotId))
@@ -75,12 +71,10 @@ public class SnapshotServiceImpl {
                 cursor = response.getResponse().getCursor();
                 if (cursor == null) hasMore = false;
 
-                // Небольшая задержка, чтобы не поймать 429
                 Thread.sleep(150);
-
             } catch (Exception e) {
                 log.error("Error processing collection {}: {}", collectionAddress, e.getMessage());
-                hasMore = false; // При ошибке пропускаем коллекцию
+                hasMore = false;
             }
         }
     }
@@ -90,13 +84,10 @@ public class SnapshotServiceImpl {
         doc.setEventType("SNAPSHOT_LIST");
         doc.setSnapshotId(snapshotId);
         doc.setTimestamp(System.currentTimeMillis());
-
         doc.setAddress(item.getAddress());
         doc.setCollectionAddress(item.getCollectionAddress());
         doc.setName(item.getName());
         doc.setIsOffchain(item.isOffchain());
-
-        // Hash = SnapshotID + Address. Гарантирует уникальность записи в рамках одного снапшота.
         doc.setHash(snapshotId + "_" + item.getAddress());
 
         if (item.getSale() != null) {
@@ -104,19 +95,20 @@ public class SnapshotServiceImpl {
             doc.setPriceNano(nano);
             doc.setPrice(fromNano(nano));
             doc.setCurrency(item.getSale().getCurrency());
-            doc.setOldOwner(item.getOwnerAddress()); // Продавец
+            doc.setOldOwner(item.getOwnerAddress());
         }
-
         return doc;
     }
 
-    private void finishSnapshot(String snapshotId) {
+    private void finishSnapshot(String snapshotId, long startTime) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
         doc.setEventType("SNAPSHOT_FINISH");
         doc.setSnapshotId(snapshotId);
         doc.setTimestamp(System.currentTimeMillis());
+        // ИСПРАВЛЕНИЕ: Передаем время начала в поле priceNano (как хранилище данных)
+        doc.setPriceNano(String.valueOf(startTime));
+
         doc.setHash("FINISH_" + snapshotId);
-        // Заглушки для обязательных полей
         doc.setAddress("SYSTEM");
         doc.setCollectionAddress("SYSTEM");
 
@@ -124,7 +116,6 @@ public class SnapshotServiceImpl {
         log.info("Snapshot {} FINISHED. Finish event saved.", snapshotId);
     }
 
-    // Хелпер: Nano -> String (Human)
     private String fromNano(String nano) {
         if (nano == null) return "0";
         try {
