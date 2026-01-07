@@ -64,11 +64,10 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         sale.setPriceNano(priceNano);
         sale.setCurrency(event.getCurrency());
         sale.setSeller(event.getOldOwner());
-        // ИСПРАВЛЕНИЕ: setIsOffchain -> setOffchain (Lombok для boolean примитива)
         sale.setOffchain(Boolean.TRUE.equals(event.getIsOffchain()));
         sale.setLastSnapshotId(event.getSnapshotId());
 
-        // ИСПРАВЛЕНИЕ: System Time vs Blockchain Time. Для актуальности записи используем серверное время.
+        // Исправление #2: System Time
         sale.setUpdatedAt(Instant.now());
 
         currentSaleRepository.save(sale);
@@ -77,22 +76,20 @@ public class MarketStateMachineImpl implements MarketStateMachine {
     private void handleSnapshotFinish(GiftHistoryDocument event) {
         String currentSnapshotId = event.getSnapshotId();
 
-        // ИСПРАВЛЕНИЕ: Читаем время старта снапшота из priceNano
+        // Исправление #3: Race Condition logic
         long snapshotStartTime = 0L;
         try {
             snapshotStartTime = Long.parseLong(event.getPriceNano());
         } catch (NumberFormatException e) {
             log.error("Invalid snapshot start time in priceNano: {}", event.getPriceNano());
-            return; // Небезопасно удалять, если нет метки времени
+            return;
         }
 
         Instant safeThreshold = Instant.ofEpochMilli(snapshotStartTime);
         log.info("Finalizing snapshot ID: {}. Threshold: {}", currentSnapshotId, safeThreshold);
 
         Query query = new Query();
-        // Удаляем только если ID снапшота старый (или null)
         query.addCriteria(Criteria.where("lastSnapshotId").ne(currentSnapshotId));
-        // И ГЛАВНОЕ: Удаляем только если запись не обновлялась с момента начала снапшота (Realtime не трогал её)
         query.addCriteria(Criteria.where("updatedAt").lt(safeThreshold));
 
         var result = mongoTemplate.remove(query, CurrentSaleDocument.class);
@@ -106,7 +103,6 @@ public class MarketStateMachineImpl implements MarketStateMachine {
                         .address(event.getAddress())
                         .collectionAddress(event.getCollectionAddress())
                         .name(event.getName())
-                        // ИСПРАВЛЕНИЕ: setIsOffchain -> setOffchain
                         .isOffchain(Boolean.TRUE.equals(event.getIsOffchain()))
                         .listedAt(Instant.ofEpochMilli(event.getTimestamp()))
                         .build());
@@ -115,7 +111,7 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         sale.setPriceNano(priceNano);
         sale.setCurrency(event.getCurrency());
         sale.setSeller(event.getOldOwner());
-        // ИСПРАВЛЕНИЕ: Обновляем дату актуализации текущим временем сервера
+        // Исправление #2: System Time
         sale.setUpdatedAt(Instant.now());
 
         currentSaleRepository.save(sale);
@@ -126,9 +122,18 @@ public class MarketStateMachineImpl implements MarketStateMachine {
     }
 
     private void handleSold(GiftHistoryDocument event) {
+        // Удаляем из списка активных продаж
         currentSaleRepository.deleteByAddress(event.getAddress());
+
         Long priceNano = parseNano(event.getPriceNano());
+
+        // ИСПРАВЛЕНИЕ #4: Идемпотентность
+        // Мы используем хеш события как ID документа.
+        // Если процессор обработает это событие дважды, он просто перезапишет тот же документ, а не создаст дубль.
+        String deterministicId = event.getHash();
+
         SoldGiftDocument sold = SoldGiftDocument.builder()
+                .id(deterministicId) // <--- Устанавливаем ID явно
                 .address(event.getAddress())
                 .collectionAddress(event.getCollectionAddress())
                 .name(event.getName())
@@ -140,6 +145,7 @@ public class MarketStateMachineImpl implements MarketStateMachine {
                 .soldAt(Instant.ofEpochMilli(event.getTimestamp()))
                 .isOffchain(Boolean.TRUE.equals(event.getIsOffchain()))
                 .build();
+
         soldGiftRepository.save(sold);
     }
 

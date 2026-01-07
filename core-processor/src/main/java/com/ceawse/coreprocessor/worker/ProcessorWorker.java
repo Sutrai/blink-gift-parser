@@ -36,9 +36,8 @@ public class ProcessorWorker {
         String lastId = state.getLastProcessedId();
 
         Query query = new Query();
-        // ИСПРАВЛЕНИЕ: Используем gte (больше или равно), чтобы не терять события с тем же timestamp
+        // Исправление #1: GTE для timestamp
         query.addCriteria(Criteria.where("timestamp").gte(lastTime));
-        // ВАЖНО: Сортируем по времени И по ID для детерминированного порядка
         query.with(Sort.by(Sort.Direction.ASC, "timestamp", "id"));
         query.limit(BATCH_SIZE);
 
@@ -55,7 +54,7 @@ public class ProcessorWorker {
         boolean stateChanged = false;
 
         for (GiftHistoryDocument event : events) {
-            // ФИЛЬТРАЦИЯ: Пропускаем события, которые мы уже видели (тот же timestamp и id <= сохраненного)
+            // Фильтрация дублей
             if (event.getTimestamp() == lastTime && lastId != null && event.getId().compareTo(lastId) <= 0) {
                 continue;
             }
@@ -63,17 +62,21 @@ public class ProcessorWorker {
             try {
                 stateMachine.applyEvent(event);
 
-                // Обновляем курсоры текущего батча
+                // Успешно обработали - обновляем локальные курсоры
                 maxTimeInBatch = event.getTimestamp();
                 maxIdInBatch = event.getId();
                 stateChanged = true;
+
             } catch (Exception e) {
-                log.error("Error processing event {}: {}", event.getId(), e.getMessage());
-                // В продакшене тут нужен Dead Letter Queue. Сейчас пропускаем событие, но двигаем курсор,
-                // чтобы не застрять вечно на одной ошибке.
-                maxTimeInBatch = event.getTimestamp();
-                maxIdInBatch = event.getId();
-                stateChanged = true;
+                // ИСПРАВЛЕНИЕ #5: Error Handling
+                // Если произошла ошибка (БД недоступна, логика сломалась), мы должны ОСТАНОВИТЬСЯ.
+                // Нельзя пропускать событие, иначе данные потеряются навсегда.
+                log.error("CRITICAL ERROR processing event ID={}. Stopping batch to retry later. Error: {}", event.getId(), e.getMessage());
+
+                // Прерываем цикл.
+                // Код ниже (if stateChanged) сохранит прогресс ДО этого события.
+                // В следующем запуске @Scheduled мы начнем ровно с этого проблемного события.
+                break;
             }
         }
 
@@ -81,6 +84,7 @@ public class ProcessorWorker {
             state.setLastProcessedTimestamp(maxTimeInBatch);
             state.setLastProcessedId(maxIdInBatch);
             stateRepository.save(state);
+            log.debug("State updated: time={}, id={}", maxTimeInBatch, maxIdInBatch);
         }
     }
 }
