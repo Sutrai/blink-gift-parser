@@ -6,6 +6,8 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
+import java.util.List;
+
 @FeignClient(
         name = "getGemsClient",
         url = "https://api.getgems.io/public-api",
@@ -13,15 +15,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 )
 public interface GetGemsApiClient {
 
-    /**
-     * Получение глобальной истории подарков.
-     * Не используем reverse=true для продакшена.
-     */
     @GetMapping("/v1/nfts/history/gifts")
+        // УБРАЛИ @CollectionFormat - пусть Spring сам разбивает массив на types=a&types=b
     GetGemsHistoryDto getHistory(
-            @RequestParam("minTime") Long minTime, // start window
-            @RequestParam(value = "maxTime", required = false) Long maxTime, // end window
+            @RequestParam("minTime") Long minTime,
+            @RequestParam(value = "maxTime", required = false) Long maxTime,
             @RequestParam("limit") int limit,
-            @RequestParam(value = "after", required = false) String cursor
+            @RequestParam(value = "after", required = false) String cursor,
+            @RequestParam("types") List<String> types,
+            @RequestParam("reverse") boolean reverse
     );
 }

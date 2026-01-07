@@ -12,7 +12,7 @@ spring:
         enabled: false
 
 server:
-  port: 7778
+  port: 7780
   error:
     include-stacktrace: always
 

@@ -1,4 +1,4 @@
-package com.ceawse.blinkgift.dto;
+package com.ceawse.coreprocessor.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;

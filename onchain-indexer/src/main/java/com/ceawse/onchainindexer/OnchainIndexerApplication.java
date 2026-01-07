@@ -1,19 +1,17 @@
-package com.ceawse.blinkgift;
+package com.ceawse.onchainindexer;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.openfeign.EnableFeignClients;
-import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@EnableAsync
 @SpringBootApplication
 @EnableScheduling
-@EnableFeignClients(basePackages = "com.ceawse.blinkgift.client")
-public class BlinkGiftApplication {
+@EnableFeignClients(basePackages = "com.ceawse.onchainindexer.client")
+public class OnchainIndexerApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(BlinkGiftApplication.class, args);
+        SpringApplication.run(OnchainIndexerApplication.class, args);
     }
 
 }

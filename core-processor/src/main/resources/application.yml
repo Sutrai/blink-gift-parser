@@ -1,6 +1,6 @@
 spring:
   application:
-    name: core
+    name: core-processor
   data:
     mongodb:
       uri: mongodb://localhost:27017/main
@@ -12,7 +12,7 @@ spring:
         enabled: false
 
 server:
-  port: 7778
+  port: 7779
   error:
     include-stacktrace: always
 
@@ -21,11 +21,3 @@ logging:
     com.ceawse.blinkgift: INFO
     org.springframework.web: INFO
     org.apache.coyote: INFO
-
-feign:
-  client:
-    config:
-      default:
-        connectTimeout: 5000
-        readTimeout: 10000
-        loggerLevel: basic
