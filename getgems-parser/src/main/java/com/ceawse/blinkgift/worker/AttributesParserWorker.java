@@ -25,8 +25,6 @@ public class AttributesParserWorker {
     private final IndexerApiClient indexerClient;
     private final GetGemsApiClient getGemsClient;
     private final CollectionAttributeRepository attributeRepository;
-    // Внедряем репозиторий статистики
-    private final CollectionStatisticsRepository statisticsRepository;
 
     @Scheduled(fixedDelay = 60000)
     public void parseAttributes() {
@@ -48,11 +46,6 @@ public class AttributesParserWorker {
             if (response == null || !response.isSuccess() || response.getResponse() == null || response.getResponse().getAttributes() == null) {
                 return;
             }
-
-            // 1. Получаем сохраненную статистику коллекции (чтобы взять флор)
-            Optional<CollectionStatisticsDocument> statsOpt = statisticsRepository.findById(collectionAddress);
-            BigDecimal colFloor = statsOpt.map(CollectionStatisticsDocument::getFloorPrice).orElse(null);
-            Long colFloorNano = statsOpt.map(CollectionStatisticsDocument::getFloorPriceNano).orElse(null);
 
             List<CollectionAttributeDocument> documentsToSave = new ArrayList<>();
             Instant now = Instant.now();
@@ -76,11 +69,9 @@ public class AttributesParserWorker {
                             .priceNano(priceNano)
                             .currency("TON")
                             .itemsCount(val.getCount())
-                            // Заполняем данными из статистики
-                            .collectionFloorPrice(colFloor)
-                            .collectionFloorPriceNano(colFloorNano)
                             .updatedAt(now)
                             .build();
+
                     documentsToSave.add(doc);
                 }
             }
@@ -89,6 +80,7 @@ public class AttributesParserWorker {
                 attributeRepository.saveAll(documentsToSave);
                 log.info("Updated {} attributes for collection {}", documentsToSave.size(), collectionAddress);
             }
+
         } catch (Exception e) {
             log.error("Failed to parse attributes for collection: " + collectionAddress, e);
         }
