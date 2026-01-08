@@ -10,6 +10,11 @@ spring:
         enabled: true
       httpclient:
         enabled: false
+  task:
+    scheduling:
+      pool:
+        size: 5  # Укажи число, достаточное для всех твоих @Scheduled задач
+      thread-name-prefix: scheduled-task-
 
 server:
   port: 7778

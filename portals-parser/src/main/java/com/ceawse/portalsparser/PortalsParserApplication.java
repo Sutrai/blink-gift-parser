@@ -1,0 +1,13 @@
+package com.ceawse.portalsparser;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class PortalsParserApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(PortalsParserApplication.class, args);
+    }
+
+}

@@ -1,6 +1,7 @@
 package com.ceawse.blinkgift.client;
 
 import com.ceawse.blinkgift.config.GetGemsProxyConfig;
+import com.ceawse.blinkgift.dto.GetGemsAttributesDto;
 import com.ceawse.blinkgift.dto.GetGemsHistoryDto;
 import com.ceawse.blinkgift.dto.GetGemsSalePageDto;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -32,5 +33,10 @@ public interface GetGemsApiClient {
             @PathVariable("collectionAddress") String collectionAddress,
             @RequestParam("limit") int limit,
             @RequestParam(value = "after", required = false) String cursor
+    );
+
+    @GetMapping("/v1/collection/attributes/{collectionAddress}")
+    GetGemsAttributesDto getAttributes(
+            @PathVariable("collectionAddress") String collectionAddress
     );
 }
