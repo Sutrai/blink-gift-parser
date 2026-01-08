@@ -105,15 +105,14 @@ public class SnapshotServiceImpl {
         doc.setEventType("SNAPSHOT_FINISH");
         doc.setSnapshotId(snapshotId);
         doc.setTimestamp(System.currentTimeMillis());
-        // ИСПРАВЛЕНИЕ: Передаем время начала в поле priceNano (как хранилище данных)
-        doc.setPriceNano(String.valueOf(startTime));
 
+        doc.setEventPayload(String.valueOf(startTime));
+        doc.setPriceNano("0");
         doc.setHash("FINISH_" + snapshotId);
         doc.setAddress("SYSTEM");
         doc.setCollectionAddress("SYSTEM");
-
         historyRepository.save(doc);
-        log.info("Snapshot {} FINISHED. Finish event saved.", snapshotId);
+        log.info("Snapshot {} FINISHED.", snapshotId);
     }
 
     private String fromNano(String nano) {

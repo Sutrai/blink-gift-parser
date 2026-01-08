@@ -79,9 +79,15 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         // Исправление #3: Race Condition logic
         long snapshotStartTime = 0L;
         try {
-            snapshotStartTime = Long.parseLong(event.getPriceNano());
+            // ИСПРАВЛЕНИЕ: Читаем из eventPayload
+            if (event.getEventPayload() != null) {
+                snapshotStartTime = Long.parseLong(event.getEventPayload());
+            } else {
+                // Фоллбэк для старых записей, если они есть (можно убрать)
+                snapshotStartTime = Long.parseLong(event.getPriceNano());
+            }
         } catch (NumberFormatException e) {
-            log.error("Invalid snapshot start time in priceNano: {}", event.getPriceNano());
+            log.error("Invalid snapshot start time payload: {}", event.getEventPayload());
             return;
         }
 

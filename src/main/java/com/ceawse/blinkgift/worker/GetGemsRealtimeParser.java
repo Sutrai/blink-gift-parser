@@ -28,53 +28,55 @@ public class GetGemsRealtimeParser {
     // Типы событий, которые мы слушаем
     private static final List<String> TARGET_TYPES = List.of("sold", "cancelSale", "putUpForSale");
 
-    @Scheduled(fixedDelay = 3000) // Раз в 3 секунды
+    @Scheduled(fixedDelay = 3000)
     public void poll() {
         try {
-            // 1. Определяем, с какого времени читать
-            // Если в БД пусто (первый запуск), берем "сейчас" минус 10 секунд (на всякий случай)
             long lastTime = stateService.getState(PROCESS_ID).getLastProcessedTimestamp();
+            // Если база пустая, берем небольшой запас назад
             if (lastTime == 0) {
-                lastTime = System.currentTimeMillis() - 10_000;
+                lastTime = System.currentTimeMillis() - 60_000;
             }
 
-            // 2. Делаем запрос
             GetGemsHistoryDto response = apiClient.getHistory(
-                    lastTime,       // minTime
-                    null,           // maxTime (null = до бесконечности)
-                    50,             // limit (хватит для реалтайма)
-                    null,           // cursor (для первого прохода не нужен, если часто поллим)
-                    TARGET_TYPES,   // types
-                    false           // reverse
+                    lastTime,       // minTime (включая эту миллисекунду)
+                    null,
+                    50,
+                    null,
+                    TARGET_TYPES,
+                    false
             );
 
             if (response == null || !response.isSuccess() || response.getResponse().getItems().isEmpty()) {
-                return; // Новых событий нет
+                return;
             }
 
             List<GetGemsItemDto> items = response.getResponse().getItems();
-            log.info("Получено {} новых событий", items.size());
+            log.info("Получено {} событий (кандидаты)", items.size());
 
-            // 3. Маппим и сохраняем
-            List<GiftHistoryDocument> entities = items.stream()
+            // ФИЛЬТРАЦИЯ ДУБЛИКАТОВ
+            // Мы могли получить события, которые уже есть в БД (из-за оверлапа времени)
+            List<GiftHistoryDocument> newEntities = items.stream()
+                    .filter(item -> !repository.existsByHash(item.getHash())) // Проверяем наличие
                     .map(mapper::toEntity)
                     .toList();
 
-            repository.saveAll(entities);
+            if (!newEntities.isEmpty()) {
+                repository.saveAll(newEntities);
+                log.info("Сохранено {} НОВЫХ событий", newEntities.size());
+            }
 
-            // 4. Обновляем курсор времени
-            // Ищем самое свежее событие в пачке
+            // Обновляем курсор времени
+            // Берем максимальное время из полученной пачки БЕЗ прибавления единицы
             long maxTimestampInBatch = items.stream()
                     .mapToLong(item -> item.getTimestamp() != null ? item.getTimestamp() : 0L)
                     .max()
                     .orElse(lastTime);
 
-            // Сохраняем maxTimestamp + 1мс, чтобы в следующий раз не получать дубли
-            stateService.updateState(PROCESS_ID, maxTimestampInBatch + 1, null);
+            // Сохраняем "чистое" время. В след. раз начнем с него же и отфильтруем дубли.
+            stateService.updateState(PROCESS_ID, maxTimestampInBatch, null);
 
         } catch (Exception e) {
             log.error("Ошибка парсинга GetGems: {}", e.getMessage());
-            // Не останавливаемся, просто ждем следующий тик
         }
     }
 }

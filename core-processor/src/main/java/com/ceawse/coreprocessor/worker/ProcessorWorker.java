@@ -66,18 +66,18 @@ public class ProcessorWorker {
         boolean stateChanged = false;
 
         for (GiftHistoryDocument event : events) {
-            // Удаляем старую проверку if (... continue), так как запрос к БД теперь гарантирует новые данные
-
             try {
                 stateMachine.applyEvent(event);
-
+            } catch (Exception e) {
+                // ЛОВИМ ОШИБКУ, НО НЕ ОСТАНАВЛИВАЕМСЯ
+                // Это "Poison Pill" - событие, которое ломает логику. Мы его пропускаем.
+                log.error("SKIPPING EVENT ID={} due to processing error: {}", event.getId(), e.getMessage(), e);
+            } finally {
+                // В любом случае (успех или ошибка) мы сдвигаем курсор вперед,
+                // чтобы не застрять на этом событии навечно.
                 maxTimeInBatch = event.getTimestamp();
                 maxIdInBatch = event.getId();
                 stateChanged = true;
-            } catch (Exception e) {
-                log.error("CRITICAL ERROR processing event ID={}. Stopping batch. Error: {}", event.getId(), e.getMessage());
-                // Останавливаем батч, но сохраняем прогресс до ошибки
-                break;
             }
         }
 

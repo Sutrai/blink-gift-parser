@@ -35,5 +35,5 @@ public class GiftHistoryDocument {
     // --- НОВОЕ ПОЛЕ ---
     @Indexed
     private String snapshotId;
-    // ------------------
+    private String eventPayload;
 }

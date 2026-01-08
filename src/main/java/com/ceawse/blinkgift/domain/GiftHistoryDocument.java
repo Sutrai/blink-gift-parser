@@ -39,7 +39,7 @@ public class GiftHistoryDocument {
     // --- ДОБАВЛЕННОЕ ПОЛЕ ---
     @Indexed
     private String snapshotId;
-    // ------------------------
+    private String eventPayload;
 
     // Конструктор маппинга для Live-событий (snapshotId здесь не нужен)
     public static GiftHistoryDocument fromDto(GetGemsItemDto dto) {
