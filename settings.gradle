@@ -1,1 +1,5 @@
 rootProject.name = 'blink-gift'
+
+include 'core-processor'
+include 'onchain-indexer'
+include 'getgems-parser'
