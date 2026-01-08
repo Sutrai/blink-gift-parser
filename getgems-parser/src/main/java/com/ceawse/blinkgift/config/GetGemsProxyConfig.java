@@ -10,7 +10,7 @@ import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.util.concurrent.TimeUnit;
 
-public class GetGemsProxyConfig {
+public class    GetGemsProxyConfig {
 
     private static final String API_KEY = "1767696328881-mainnet-10772317-r-JZxQ9TmGu7URUGscDZjznrMzVtNBcCpVlOTgsFx9t8Xv8c4o";
 

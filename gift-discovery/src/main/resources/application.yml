@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: gift-discovery
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/main
+  cloud:
+    openfeign:
+      okhttp:
+        enabled: true
+      httpclient:
+        enabled: false
+
+server:
+  port: 7780
+  error:
+    include-stacktrace: always
+
+logging:
+  level:
+    com.ceawse.giftdiscovery: INFO
+    org.springframework.web: INFO
+    org.apache.coyote: INFO
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 10000
+        loggerLevel: basic
