@@ -18,6 +18,8 @@ server:
 
 logging:
   level:
-    com.ceawse.blinkgift: INFO
+    root: INFO
+    com.ceawse.coreprocessor: DEBUG
+    org.springframework.data.mongodb.core.MongoTemplate: DEBUG
     org.springframework.web: INFO
     org.apache.coyote: INFO
