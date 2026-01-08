@@ -33,6 +33,8 @@ public class CollectionAttributeDocument {
     private String currency;
 
     private Integer itemsCount;
+    private BigDecimal collectionFloorPrice;
+    private Long collectionFloorPriceNano;
 
     private Instant updatedAt;
 
