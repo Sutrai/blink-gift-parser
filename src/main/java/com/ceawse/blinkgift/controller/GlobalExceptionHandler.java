@@ -28,13 +28,6 @@ public class GlobalExceptionHandler {
     private final ErrorResponseBuilder errorResponseBuilder;
     private final boolean enableStacktrace;
 
-    /**
-     * Конструктор класса
-     *
-     * @param includeStacktrace включить или исключить отображение stacktrace в ответе.
-     *                          always - включить, never выключить.
-     * @param messageService    бин MessageService
-     */
     public GlobalExceptionHandler(
             @Value("${server.error.include-stacktrace}") String includeStacktrace,
             @Autowired MessageService messageService

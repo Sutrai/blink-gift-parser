@@ -25,23 +25,20 @@ public class GiftHistoryDocument {
     private String lt;
     private String name;
     private Long timestamp;
-    private String eventType; // mint, sold, transfer, SNAPSHOT_LIST...
+    private String eventType;
 
     private Boolean isOffchain;
 
-    // Детали сделки
     private String price;
     private String priceNano;
     private String currency;
     private String oldOwner;
     private String newOwner;
 
-    // --- ДОБАВЛЕННОЕ ПОЛЕ ---
     @Indexed
     private String snapshotId;
     private String eventPayload;
 
-    // Конструктор маппинга для Live-событий (snapshotId здесь не нужен)
     public static GiftHistoryDocument fromDto(GetGemsItemDto dto) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
 

@@ -10,16 +10,14 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Document(collection = "registry_collections")
 public class CollectionRegistryDocument {
     @Id
-    private String address; // Primary Key
+    private String address;
 
     private String name;
     private String ownerAddress;
 
-    // Флаг управления: хотим ли мы тратить ресурсы на эту коллекцию
     @Builder.Default
     private boolean enabled = true;
 
-    // Состояние индексации (курсор истории)
     private String lastHistoryCursor;
     private Long lastScanTimestamp;
 }

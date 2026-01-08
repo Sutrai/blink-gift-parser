@@ -26,7 +26,7 @@ public class SnapshotServiceImpl {
     @Async
     public void runSnapshot(String marketplace) {
         String snapshotId = UUID.randomUUID().toString();
-        // ИСПРАВЛЕНИЕ: Засекаем время начала
+
         long startTime = System.currentTimeMillis();
 
         log.info("Starting SNAPSHOT id={} for {}", snapshotId, marketplace);
@@ -39,7 +39,6 @@ public class SnapshotServiceImpl {
                 processCollection(col.address, snapshotId);
             }
 
-            // ИСПРАВЛЕНИЕ: Передаем время старта
             finishSnapshot(snapshotId, startTime);
         } catch (Exception e) {
             log.error("Snapshot FAILED", e);

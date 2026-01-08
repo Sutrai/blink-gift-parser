@@ -5,34 +5,29 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 @Data
-@JsonIgnoreProperties(ignoreUnknown = true) // Всё лишнее (картинки, атрибуты) будет проигнорировано
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class GetGemsSaleItemDto {
 
-    // Идентификаторы
     private String address;
     private String collectionAddress;
 
-    // Минимум метаданных для UI
-    private String name;          // "Skull Flower #3709"
-    private String kind;          // "OffchainNft" (нужно для флага)
+    private String name;
+    private String kind;
 
-    // Кто продает
-    private String ownerAddress;  // Он же seller в контексте листинга
+    private String ownerAddress;
 
-    // Данные о цене
     @JsonProperty("sale")
     private SaleInfo sale;
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class SaleInfo {
-        private String fullPrice;       // "9100000000"
-        private String currency;        // "TON"
-        private String type;            // "FixPriceSale"
-        private String contractAddress; // Может понадобиться для проверки типа контракта
+        private String fullPrice;
+        private String currency;
+        private String type;
+        private String contractAddress;
     }
 
-    // Хелпер
     public boolean isOffchain() {
         return "OffchainNft".equalsIgnoreCase(kind);
     }

@@ -13,9 +13,9 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public class IngestionState {
 
     @Id
-    private String id; // Например: "GETGEMS_BACKFILL" или "GETGEMS_REALTIME"
+    private String id;
 
-    private Long lastProcessedTimestamp; // Время последнего успешного события
-    private String lastCursor;           // Курсор API (если нужен)
-    private String status;               // RUNNING, PAUSED, FINISHED
+    private Long lastProcessedTimestamp;
+    private String lastCursor;
+    private String status;
 }

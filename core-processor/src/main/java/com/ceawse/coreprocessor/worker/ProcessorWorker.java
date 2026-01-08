@@ -36,10 +36,6 @@ public class ProcessorWorker {
         String lastId = state.getLastProcessedId();
 
         Query query = new Query();
-
-        // ВАЖНОЕ ИЗМЕНЕНИЕ: Правильная пагинация (Keyset Pagination)
-        // Если у нас есть lastId, мы ищем:
-        // ЛИБО (время > последнего), ЛИБО (время == последнему И id > последнего)
         if (lastId != null) {
             query.addCriteria(new Criteria().orOperator(
                     Criteria.where("timestamp").gt(lastTime),
@@ -69,12 +65,8 @@ public class ProcessorWorker {
             try {
                 stateMachine.applyEvent(event);
             } catch (Exception e) {
-                // ЛОВИМ ОШИБКУ, НО НЕ ОСТАНАВЛИВАЕМСЯ
-                // Это "Poison Pill" - событие, которое ломает логику. Мы его пропускаем.
                 log.error("SKIPPING EVENT ID={} due to processing error: {}", event.getId(), e.getMessage(), e);
             } finally {
-                // В любом случае (успех или ошибка) мы сдвигаем курсор вперед,
-                // чтобы не застрять на этом событии навечно.
                 maxTimeInBatch = event.getTimestamp();
                 maxIdInBatch = event.getId();
                 stateChanged = true;

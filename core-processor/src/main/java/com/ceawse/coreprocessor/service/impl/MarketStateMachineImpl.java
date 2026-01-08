@@ -76,14 +76,11 @@ public class MarketStateMachineImpl implements MarketStateMachine {
     private void handleSnapshotFinish(GiftHistoryDocument event) {
         String currentSnapshotId = event.getSnapshotId();
 
-        // Исправление #3: Race Condition logic
         long snapshotStartTime = 0L;
         try {
-            // ИСПРАВЛЕНИЕ: Читаем из eventPayload
             if (event.getEventPayload() != null) {
                 snapshotStartTime = Long.parseLong(event.getEventPayload());
             } else {
-                // Фоллбэк для старых записей, если они есть (можно убрать)
                 snapshotStartTime = Long.parseLong(event.getPriceNano());
             }
         } catch (NumberFormatException e) {
@@ -117,7 +114,6 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         sale.setPriceNano(priceNano);
         sale.setCurrency(event.getCurrency());
         sale.setSeller(event.getOldOwner());
-        // Исправление #2: System Time
         sale.setUpdatedAt(Instant.now());
 
         currentSaleRepository.save(sale);
@@ -128,18 +124,14 @@ public class MarketStateMachineImpl implements MarketStateMachine {
     }
 
     private void handleSold(GiftHistoryDocument event) {
-        // Удаляем из списка активных продаж
         currentSaleRepository.deleteByAddress(event.getAddress());
 
         Long priceNano = parseNano(event.getPriceNano());
 
-        // ИСПРАВЛЕНИЕ #4: Идемпотентность
-        // Мы используем хеш события как ID документа.
-        // Если процессор обработает это событие дважды, он просто перезапишет тот же документ, а не создаст дубль.
         String deterministicId = event.getHash();
 
         SoldGiftDocument sold = SoldGiftDocument.builder()
-                .id(deterministicId) // <--- Устанавливаем ID явно
+                .id(deterministicId)
                 .address(event.getAddress())
                 .collectionAddress(event.getCollectionAddress())
                 .name(event.getName())

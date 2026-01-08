@@ -17,12 +17,8 @@ public class GetGemsProxyConfig {
     @Bean
     public Client feignClient() {
         okhttp3.OkHttpClient delegate = new okhttp3.OkHttpClient.Builder()
-                // Настраиваем прокси
                 .proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", 8000)))
 
-                // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: ОТКЛЮЧАЕМ ПУЛ СОЕДИНЕНИЙ ---
-                // 0 - хранить 0 idle соединений
-                // 1, TimeUnit.NANOSECONDS - убивать соединение мгновенно
                 .connectionPool(new ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
                 // ----------------------------------------------------
 
@@ -41,7 +37,6 @@ public class GetGemsProxyConfig {
             template.header("Accept", "application/json");
             template.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
-            // Дополнительно явно просим сервер закрывать соединение
             template.header("Connection", "close");
         };
     }

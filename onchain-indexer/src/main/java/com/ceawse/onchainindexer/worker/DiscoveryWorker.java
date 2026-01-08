@@ -17,7 +17,6 @@ public class DiscoveryWorker {
     private final RegistryApiClient apiClient;
     private final CollectionRegistryRepository repository;
 
-    // Запускаем раз в час (коллекции появляются редко)
     @Scheduled(fixedDelay = 3600000)
     public void discoverCollections() {
         log.info("Starting Collection Discovery...");
@@ -34,13 +33,13 @@ public class DiscoveryWorker {
 
                 var items = response.getResponse().getItems();
                 for (var dto : items) {
-                    // Сохраняем, если нет. Если есть - не трогаем (чтобы не сбросить курсоры)
+
                     if (!repository.existsById(dto.getAddress())) {
                         CollectionRegistryDocument doc = CollectionRegistryDocument.builder()
                                 .address(dto.getAddress())
                                 .name(dto.getName())
                                 .ownerAddress(dto.getOwnerAddress())
-                                .enabled(true) // Новые коллекции включаем по умолчанию
+                                .enabled(true)
                                 .build();
                         repository.save(doc);
                         log.info("Discovered new collection: {}", dto.getName());
@@ -52,7 +51,7 @@ public class DiscoveryWorker {
 
             } catch (Exception e) {
                 log.error("Discovery error", e);
-                hasMore = false; // Прерываем цикл при ошибке, попробуем через час
+                hasMore = false;
             }
         }
     }

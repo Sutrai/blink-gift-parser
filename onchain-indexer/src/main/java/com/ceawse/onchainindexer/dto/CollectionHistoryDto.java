@@ -21,16 +21,16 @@ public class CollectionHistoryDto {
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class HistoryItemDto {
-        private String address;           // Адрес самого подарка (NFT)
-        private String name;              // "Dog #123"
-        private Long timestamp;           // Время события (mint)
+        private String address;
+        private String name;
+        private Long timestamp;
         private String collectionAddress;
-        private TypeDataDto typeData;     // Чтобы проверить тип события
+        private TypeDataDto typeData;
     }
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class TypeDataDto {
-        private String type; // "mint", "transfer" и т.д.
+        private String type;
     }
 }

@@ -18,7 +18,6 @@ import java.util.List;
 public interface GetGemsApiClient {
 
     @GetMapping("/v1/nfts/history/gifts")
-        // УБРАЛИ @CollectionFormat - пусть Spring сам разбивает массив на types=a&types=b
     GetGemsHistoryDto getHistory(
             @RequestParam("minTime") Long minTime,
             @RequestParam(value = "maxTime", required = false) Long maxTime,

@@ -15,14 +15,12 @@ public class GiftHistoryDocument {
     @Indexed
     private String address;
     @Indexed
-    private String hash; // Для snapshot-событий можно генерировать уникальный хеш: snapshotId + address
+    private String hash;
 
     private String lt;
     private String name;
     private Long timestamp;
 
-    // Типы: putupforsale, sold, cancelsale, ...
-    // НОВЫЕ ТИПЫ: SNAPSHOT_LIST, SNAPSHOT_FINISH, SNAPSHOT_UNLIST
     private String eventType;
 
     private Boolean isOffchain;
@@ -32,7 +30,6 @@ public class GiftHistoryDocument {
     private String oldOwner;
     private String newOwner;
 
-    // --- НОВОЕ ПОЛЕ ---
     @Indexed
     private String snapshotId;
     private String eventPayload;

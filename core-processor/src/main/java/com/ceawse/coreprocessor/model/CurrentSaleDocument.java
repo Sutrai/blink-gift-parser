@@ -27,8 +27,6 @@ public class CurrentSaleDocument {
     private Instant updatedAt;
     private boolean isOffchain;
 
-    // --- НОВОЕ ПОЛЕ ---
-    // ID последнего снапшота, который подтвердил наличие этого лота
     @Indexed
     private String lastSnapshotId;
 }

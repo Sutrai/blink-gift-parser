@@ -25,20 +25,19 @@ public class GetGemsRealtimeParser {
     private final EventMapper mapper;
 
     private static final String PROCESS_ID = "GETGEMS_LIVE";
-    // Типы событий, которые мы слушаем
+
     private static final List<String> TARGET_TYPES = List.of("sold", "cancelSale", "putUpForSale");
 
     @Scheduled(fixedDelay = 3000)
     public void poll() {
         try {
             long lastTime = stateService.getState(PROCESS_ID).getLastProcessedTimestamp();
-            // Если база пустая, берем небольшой запас назад
             if (lastTime == 0) {
                 lastTime = System.currentTimeMillis() - 60_000;
             }
 
             GetGemsHistoryDto response = apiClient.getHistory(
-                    lastTime,       // minTime (включая эту миллисекунду)
+                    lastTime,
                     null,
                     50,
                     null,
@@ -53,10 +52,8 @@ public class GetGemsRealtimeParser {
             List<GetGemsItemDto> items = response.getResponse().getItems();
             log.info("Получено {} событий (кандидаты)", items.size());
 
-            // ФИЛЬТРАЦИЯ ДУБЛИКАТОВ
-            // Мы могли получить события, которые уже есть в БД (из-за оверлапа времени)
             List<GiftHistoryDocument> newEntities = items.stream()
-                    .filter(item -> !repository.existsByHash(item.getHash())) // Проверяем наличие
+                    .filter(item -> !repository.existsByHash(item.getHash()))
                     .map(mapper::toEntity)
                     .toList();
 
@@ -65,14 +62,11 @@ public class GetGemsRealtimeParser {
                 log.info("Сохранено {} НОВЫХ событий", newEntities.size());
             }
 
-            // Обновляем курсор времени
-            // Берем максимальное время из полученной пачки БЕЗ прибавления единицы
             long maxTimestampInBatch = items.stream()
                     .mapToLong(item -> item.getTimestamp() != null ? item.getTimestamp() : 0L)
                     .max()
                     .orElse(lastTime);
 
-            // Сохраняем "чистое" время. В след. раз начнем с него же и отфильтруем дубли.
             stateService.updateState(PROCESS_ID, maxTimestampInBatch, null);
 
         } catch (Exception e) {

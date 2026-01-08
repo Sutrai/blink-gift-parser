@@ -12,16 +12,15 @@ import java.time.Instant;
 @Document(collection = "registry_items")
 public class ItemRegistryDocument {
     @Id
-    private String address; // Уникальный адрес NFT
+    private String address;
 
     @Indexed
     private String collectionAddress;
 
     @Indexed
-    private String name; // "Gift #123"
+    private String name;
 
     private Instant mintedAt;
 
-    // Метка времени, когда мы последний раз видели обновление этого предмета
     private Instant lastSeenAt;
 }
