@@ -71,7 +71,7 @@ public class SafeGiftAttributesWorker {
                     String slug = formatSlug(gift.getName());
                     UniqueGiftDocument.GiftAttributes attributes;
 
-                    if (Boolean.TRUE.equals(gift.isOffchain())) {
+                    if (gift.isOffchainSafe()) {
                         String html = telegramApiClient.getNftPage(slug);
                         attributes = parseAttributesFromHtml(html);
                     } else {

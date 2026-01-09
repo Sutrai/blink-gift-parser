@@ -22,7 +22,10 @@ public class UniqueGiftDocument {
     @Indexed
     private String collectionAddress;
 
-    private boolean isOffchain;
+    // БЫЛО: private boolean isOffchain;
+    // СТАЛО: Иcпользуем Boolean (обертку), чтобы избежать ошибки null
+    private Boolean isOffchain;
+
     private String discoverySource;
     private Instant firstSeenAt;
     private Instant lastSeenAt;
@@ -35,7 +38,7 @@ public class UniqueGiftDocument {
     public static class GiftAttributes {
         private String model;
         private BigDecimal modelPrice;
-        private Integer modelRarityCount; // Количество предметов с таким атрибутом
+        private Integer modelRarityCount;
 
         private String backdrop;
         private BigDecimal backdropPrice;
@@ -51,8 +54,12 @@ public class UniqueGiftDocument {
     @Data
     @Builder
     public static class MarketData {
-        private BigDecimal collectionFloorPrice; // Floor коллекции
-        private BigDecimal estimatedPrice;       // Расчетная цена по формуле
+        private BigDecimal collectionFloorPrice;
+        private BigDecimal estimatedPrice;
         private Instant priceUpdatedAt;
+    }
+
+    public boolean isOffchainSafe() {
+        return Boolean.TRUE.equals(isOffchain);
     }
 }
