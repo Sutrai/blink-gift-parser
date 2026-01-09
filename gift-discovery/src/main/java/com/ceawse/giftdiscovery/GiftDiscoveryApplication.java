@@ -6,7 +6,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @EnableScheduling
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.ceawse.giftdiscovery")
 @EnableFeignClients(basePackages = "com.ceawse.giftdiscovery.client")
 public class GiftDiscoveryApplication {
 
