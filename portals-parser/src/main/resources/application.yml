@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: portals-parser
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/main
+  cloud:
+    openfeign:
+      okhttp:
+        enabled: true
+      httpclient:
+        enabled: false
+  task:
+    scheduling:
+      pool:
+        size: 5
+      thread-name-prefix: scheduled-task-
+
+server:
+  port: 7782
+  error:
+    include-stacktrace: always
+
+portals:
+  api-url: https://portal-market.com/api
+
+logging:
+  level:
+    com.ceawse.portalsparser.client: DEBUG
+    org.springframework.web: INFO
+    org.apache.coyote: INFO
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 10000
+        loggerLevel: basic

@@ -36,7 +36,7 @@ public class PortalsSnapshotService {
             while (hasMore) {
                 // sort_by=price+asc соответствует логике поиска ликвидности
                 PortalsSearchResponseDto response = apiClient.searchNfts(
-                        offset, limit, "price+asc", "listed", true
+                        offset, limit, "price asc", "listed", true
                 );
 
                 if (response == null || response.getResults() == null || response.getResults().isEmpty()) {

@@ -11,10 +11,16 @@ import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.util.concurrent.TimeUnit;
 
+import feign.Logger;
+
 public class PortalsProxyConfig {
 
-    @Value("${portals.auth-token}")
     private String authToken;
+
+    @Bean
+    Logger.Level feignLoggerLevel() {
+        return Logger.Level.FULL; // Включает полное логирование (Headers + Body)
+    }
 
     @Bean
     public Client feignClient() {
@@ -34,7 +40,7 @@ public class PortalsProxyConfig {
         return template -> {
             template.header("Authorization", authToken);
             template.header("Accept", "application/json, text/plain, */*");
-            template.header("Accept-Encoding", "gzip, deflate, br, zstd");
+
             template.header("Accept-Language", "en-US,en;q=0.9,ru;q=0.8");
             template.header("Origin", "https://portal-market.com");
             template.header("Referer", "https://portal-market.com/");

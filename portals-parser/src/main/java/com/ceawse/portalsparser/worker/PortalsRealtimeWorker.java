@@ -13,7 +13,6 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 
 @Slf4j
@@ -27,17 +26,18 @@ public class PortalsRealtimeWorker {
 
     private static final String PROCESS_ID = "PORTALS_LIVE";
 
-    // Опрашиваем каждые 3 секунды
     @Scheduled(fixedDelay = 3000)
     public void pollEvents() {
         try {
             PortalsIngestionState state = stateRepository.findById(PROCESS_ID)
-                    .orElse(new PortalsIngestionState(PROCESS_ID, System.currentTimeMillis() - 60000)); // Дефолт: минуту назад
+                    .orElse(new PortalsIngestionState(PROCESS_ID, System.currentTimeMillis() - 60000));
 
-            // Запрашиваем "buy,listing,price_update"
-            // Сортировка "latest" означает самые новые первыми в списке
+            // ИСПРАВЛЕНИЕ ЗДЕСЬ:
+            // Было: "latest"
+            // Стало: "listed_at desc"
+            // Также action_types передаем через запятую, Feign сам закодирует их в %2C
             PortalsActionsResponseDto response = apiClient.getMarketActivity(
-                    0, 50, "latest", "buy,listing,price_update"
+                    0, 50, "listed_at desc", "buy,listing,price_update"
             );
 
             if (response == null || response.getActions() == null || response.getActions().isEmpty()) {
@@ -45,29 +45,20 @@ public class PortalsRealtimeWorker {
             }
 
             List<PortalsActionsResponseDto.ActionDto> actions = response.getActions();
-            // Разворачиваем, чтобы обрабатывать от старых к новым (если нужно),
-            // но для фильтрации по времени удобнее просто идти по списку
-
             long lastProcessedTime = state.getLastProcessedTimestamp();
             long newMaxTime = lastProcessedTime;
-
             int savedCount = 0;
 
             for (PortalsActionsResponseDto.ActionDto action : actions) {
                 long actionTime = parseTime(action.getCreatedAt());
 
-                // Пропускаем уже обработанные
                 if (actionTime <= lastProcessedTime) {
                     continue;
                 }
 
-                // Маппим
                 PortalsGiftHistoryDocument doc = mapToEntity(action, actionTime);
-                doc.setMarketplace("portals");
 
-                // Дедупликация по хешу (offer_id в Portals может быть неуникальным для разных типов действий?
-                // Обычно activity id уникален. Используем комбинацию если надо, но пока offer_id + type)
-                // Примечание: action.offerId может быть null в некоторых случаях, нужно проверять
+                // Используем offerId как базу для хеша, так как он есть в DTO
                 if (doc.getHash() != null && !historyRepository.existsByHash(doc.getHash())) {
                     historyRepository.save(doc);
                     savedCount++;
@@ -89,8 +80,10 @@ public class PortalsRealtimeWorker {
         }
     }
 
+    // mapToEntity и другие методы остаются без изменений...
     private PortalsGiftHistoryDocument mapToEntity(PortalsActionsResponseDto.ActionDto action, long timestamp) {
         PortalsGiftHistoryDocument doc = new PortalsGiftHistoryDocument();
+        doc.setMarketplace("portals");
         doc.setTimestamp(timestamp);
         doc.setIsOffchain(true);
 
@@ -103,22 +96,21 @@ public class PortalsRealtimeWorker {
             doc.setName("UNKNOWN");
         }
 
-        // Mapping types to System standard
-        // Portals: buy, listing, price_update
-        // System: SOLD, PUTUPFORSALE, CANCELSALE
         String sysType = "UNKNOWN";
-        switch (action.getType()) {
-            case "listing":
-                sysType = "PUTUPFORSALE";
-                break;
-            case "buy":
-                sysType = "SOLD";
-                break;
-            case "price_update":
-                sysType = "PUTUPFORSALE"; // Обновление цены = новый листинг в логике истории
-                break;
-            default:
-                sysType = action.getType().toUpperCase();
+        if (action.getType() != null) {
+            switch (action.getType()) {
+                case "listing":
+                    sysType = "PUTUPFORSALE";
+                    break;
+                case "buy":
+                    sysType = "SOLD";
+                    break;
+                case "price_update":
+                    sysType = "PUTUPFORSALE";
+                    break;
+                default:
+                    sysType = action.getType().toUpperCase();
+            }
         }
         doc.setEventType(sysType);
 

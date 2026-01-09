@@ -14,24 +14,21 @@ import org.springframework.web.bind.annotation.RequestParam;
 )
 public interface PortalsApiClient {
 
-    // Эндпоинт для получения событий (Realtime)
-    // Аналог marketActivity из Python
     @GetMapping("/market/actions/")
     PortalsActionsResponseDto getMarketActivity(
             @RequestParam("offset") int offset,
             @RequestParam("limit") int limit,
-            @RequestParam("sort_by") String sortBy, // usually "latest" -> listed_at desc
-            @RequestParam("action_types") String actionTypes // buy,listing,price_update
+            @RequestParam("sort_by") String sortBy,
+            @RequestParam("action_types") String actionTypes
     );
 
-    // Эндпоинт для получения текущих листингов (Snapshot)
-    // Аналог search из Python
+
     @GetMapping("/nfts/search")
     PortalsSearchResponseDto searchNfts(
             @RequestParam("offset") int offset,
             @RequestParam("limit") int limit,
-            @RequestParam("sort_by") String sortBy, // usually "price+asc"
-            @RequestParam("status") String status, // "listed"
+            @RequestParam("sort_by") String sortBy,
+            @RequestParam("status") String status,
             @RequestParam("exclude_bundled") boolean excludeBundled
     );
 }

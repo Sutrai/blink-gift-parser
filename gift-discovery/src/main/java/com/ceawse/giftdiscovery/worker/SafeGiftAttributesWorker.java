@@ -118,12 +118,28 @@ public class SafeGiftAttributesWorker {
         }
     }
 
-    // ... (Методы formatSlug, mapFragmentDtoToModel, parseAttributesFromHtml, extractValue остаются без изменений) ...
-    // Скопируйте их из предыдущего ответа, если нужно, или оставьте как есть.
-
     private String formatSlug(String name) {
         if (name == null) return "";
-        return name.replace(" ", "").replace("'", "").replace("’", "").replace("#", "-");
+
+        int hashIndex = name.lastIndexOf('#');
+
+        if (hashIndex != -1) {
+            String namePart = name.substring(0, hashIndex);
+
+            String numberPart = name.substring(hashIndex + 1).trim();
+
+            String cleanName = namePart
+                    .replace(" ", "")
+                    .replace("'", "")
+                    .replace("’", "")
+                    .replace("-", "")
+                    .trim();
+
+            return cleanName + "-" + numberPart;
+        }
+
+        // Если решетки нет (фоллбэк для странных данных)
+        return name.replace(" ", "").replace("'", "").replace("’", "").replace("-", "");
     }
 
     private UniqueGiftDocument.GiftAttributes mapFragmentDtoToModel(GiftAttributesDto dto) {
