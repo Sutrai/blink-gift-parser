@@ -9,6 +9,7 @@ public class EventMapper {
 
     public GiftHistoryDocument toEntity(GetGemsItemDto dto) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
+        // Явно устанавливаем маркетплейс
         doc.setMarketplace("getgems");
 
         doc.setCollectionAddress(dto.getCollectionAddress());
@@ -28,7 +29,6 @@ public class EventMapper {
             doc.setOldOwner(typeData.getOldOwner());
             doc.setNewOwner(typeData.getNewOwner());
         }
-
         return doc;
     }
 

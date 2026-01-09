@@ -3,9 +3,12 @@ package com.ceawse.portalsparser.worker;
 import com.ceawse.portalsparser.client.PortalsApiClient;
 import com.ceawse.portalsparser.domain.PortalsGiftHistoryDocument;
 import com.ceawse.portalsparser.domain.PortalsIngestionState;
+import com.ceawse.portalsparser.domain.UniqueGiftDocument;
 import com.ceawse.portalsparser.dto.PortalsActionsResponseDto;
+import com.ceawse.portalsparser.dto.PortalsNftDto;
 import com.ceawse.portalsparser.repository.PortalsGiftHistoryRepository;
 import com.ceawse.portalsparser.repository.PortalsIngestionStateRepository;
+import com.ceawse.portalsparser.repository.PortalsUniqueGiftRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,6 +26,7 @@ public class PortalsRealtimeWorker {
     private final PortalsApiClient apiClient;
     private final PortalsGiftHistoryRepository historyRepository;
     private final PortalsIngestionStateRepository stateRepository;
+    private final PortalsUniqueGiftRepository uniqueGiftRepository;
 
     private static final String PROCESS_ID = "PORTALS_LIVE";
 
@@ -32,10 +36,6 @@ public class PortalsRealtimeWorker {
             PortalsIngestionState state = stateRepository.findById(PROCESS_ID)
                     .orElse(new PortalsIngestionState(PROCESS_ID, System.currentTimeMillis() - 60000));
 
-            // ИСПРАВЛЕНИЕ ЗДЕСЬ:
-            // Было: "latest"
-            // Стало: "listed_at desc"
-            // Также action_types передаем через запятую, Feign сам закодирует их в %2C
             PortalsActionsResponseDto response = apiClient.getMarketActivity(
                     0, 50, "listed_at desc", "buy,listing,price_update"
             );
@@ -56,12 +56,16 @@ public class PortalsRealtimeWorker {
                     continue;
                 }
 
+                // 1. Сохраняем событие истории
                 PortalsGiftHistoryDocument doc = mapToEntity(action, actionTime);
-
-                // Используем offerId как базу для хеша, так как он есть в DTO
                 if (doc.getHash() != null && !historyRepository.existsByHash(doc.getHash())) {
                     historyRepository.save(doc);
                     savedCount++;
+                }
+
+                // 2. Если есть данные NFT, сохраняем атрибуты в unique_gifts
+                if (action.getNft() != null) {
+                    saveUniqueGiftWithAttributes(action.getNft());
                 }
 
                 if (actionTime > newMaxTime) {
@@ -80,17 +84,42 @@ public class PortalsRealtimeWorker {
         }
     }
 
-    // mapToEntity и другие методы остаются без изменений...
+    private void saveUniqueGiftWithAttributes(PortalsNftDto nft) {
+        if (nft.getAttributes() == null || nft.getAttributes().isEmpty()) return;
+
+        String formattedName = formatName(nft.getName(), nft.getExternalCollectionNumber());
+
+        UniqueGiftDocument.GiftAttributes.GiftAttributesBuilder attrsBuilder = UniqueGiftDocument.GiftAttributes.builder();
+        attrsBuilder.updatedAt(Instant.now());
+
+        for (PortalsNftDto.AttributeDto attr : nft.getAttributes()) {
+            if ("model".equalsIgnoreCase(attr.getType())) attrsBuilder.model(attr.getValue());
+            if ("backdrop".equalsIgnoreCase(attr.getType())) attrsBuilder.backdrop(attr.getValue());
+            if ("symbol".equalsIgnoreCase(attr.getType())) attrsBuilder.symbol(attr.getValue());
+        }
+
+        UniqueGiftDocument doc = UniqueGiftDocument.builder()
+                .id(nft.getId())
+                .name(formattedName)
+                .collectionAddress(nft.getCollectionId())
+                .attributes(attrsBuilder.build())
+                .lastSeenAt(Instant.now())
+                .build();
+
+        uniqueGiftRepository.save(doc);
+    }
+
     private PortalsGiftHistoryDocument mapToEntity(PortalsActionsResponseDto.ActionDto action, long timestamp) {
         PortalsGiftHistoryDocument doc = new PortalsGiftHistoryDocument();
-        doc.setMarketplace("portals");
+        doc.setMarketplace("portals"); // Явно указываем маркетплейс
         doc.setTimestamp(timestamp);
         doc.setIsOffchain(true);
 
         if (action.getNft() != null) {
             doc.setAddress(action.getNft().getId());
             doc.setCollectionAddress(action.getNft().getCollectionId());
-            doc.setName(action.getNft().getName());
+            // Формируем правильное имя
+            doc.setName(formatName(action.getNft().getName(), action.getNft().getExternalCollectionNumber()));
         } else {
             doc.setAddress("UNKNOWN");
             doc.setName("UNKNOWN");
@@ -123,9 +152,17 @@ public class PortalsRealtimeWorker {
         String uniqueHash = (action.getOfferId() != null ? action.getOfferId() : "no_id")
                 + "_" + action.getType()
                 + "_" + timestamp;
+
         doc.setHash(uniqueHash);
 
         return doc;
+    }
+
+    private String formatName(String rawName, Long number) {
+        if (number != null) {
+            return rawName + " #" + number;
+        }
+        return rawName;
     }
 
     private long parseTime(String isoTime) {
