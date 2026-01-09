@@ -66,8 +66,7 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         sale.setSeller(event.getOldOwner());
         sale.setOffchain(Boolean.TRUE.equals(event.getIsOffchain()));
         sale.setLastSnapshotId(event.getSnapshotId());
-
-        // Исправление #2: System Time
+        sale.setMarketplace(event.getMarketplace()); // <-- Сохраняем площадку
         sale.setUpdatedAt(Instant.now());
 
         currentSaleRepository.save(sale);
@@ -75,6 +74,7 @@ public class MarketStateMachineImpl implements MarketStateMachine {
 
     private void handleSnapshotFinish(GiftHistoryDocument event) {
         String currentSnapshotId = event.getSnapshotId();
+        String marketplace = event.getMarketplace(); // <-- Получаем площадку события
 
         long snapshotStartTime = 0L;
         try {
@@ -89,14 +89,17 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         }
 
         Instant safeThreshold = Instant.ofEpochMilli(snapshotStartTime);
-        log.info("Finalizing snapshot ID: {}. Threshold: {}", currentSnapshotId, safeThreshold);
+        log.info("Finalizing snapshot ID: {} for marketplace: {}. Threshold: {}", currentSnapshotId, marketplace, safeThreshold);
 
         Query query = new Query();
+        if (marketplace != null) {
+            query.addCriteria(Criteria.where("marketplace").is(marketplace));
+        }
         query.addCriteria(Criteria.where("lastSnapshotId").ne(currentSnapshotId));
         query.addCriteria(Criteria.where("updatedAt").lt(safeThreshold));
 
         var result = mongoTemplate.remove(query, CurrentSaleDocument.class);
-        log.info("Snapshot finalized. Removed {} stale listings.", result.getDeletedCount());
+        log.info("Snapshot finalized for {}. Removed {} stale listings.", marketplace, result.getDeletedCount());
     }
 
     private void handleList(GiftHistoryDocument event) {
@@ -114,6 +117,7 @@ public class MarketStateMachineImpl implements MarketStateMachine {
         sale.setPriceNano(priceNano);
         sale.setCurrency(event.getCurrency());
         sale.setSeller(event.getOldOwner());
+        sale.setMarketplace(event.getMarketplace()); // <-- Сохраняем площадку
         sale.setUpdatedAt(Instant.now());
 
         currentSaleRepository.save(sale);
@@ -125,13 +129,10 @@ public class MarketStateMachineImpl implements MarketStateMachine {
 
     private void handleSold(GiftHistoryDocument event) {
         currentSaleRepository.deleteByAddress(event.getAddress());
-
         Long priceNano = parseNano(event.getPriceNano());
 
-        String deterministicId = event.getHash();
-
         SoldGiftDocument sold = SoldGiftDocument.builder()
-                .id(deterministicId)
+                .id(event.getHash())
                 .address(event.getAddress())
                 .collectionAddress(event.getCollectionAddress())
                 .name(event.getName())
@@ -142,6 +143,7 @@ public class MarketStateMachineImpl implements MarketStateMachine {
                 .buyer(event.getNewOwner())
                 .soldAt(Instant.ofEpochMilli(event.getTimestamp()))
                 .isOffchain(Boolean.TRUE.equals(event.getIsOffchain()))
+                .marketplace(event.getMarketplace()) // <-- Сохраняем площадку
                 .build();
 
         soldGiftRepository.save(sold);

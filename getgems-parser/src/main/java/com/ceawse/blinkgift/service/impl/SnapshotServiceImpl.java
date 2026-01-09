@@ -80,6 +80,7 @@ public class SnapshotServiceImpl {
 
     private GiftHistoryDocument mapToEvent(GetGemsSaleItemDto item, String snapshotId) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
+        doc.setMarketplace("getgems");
         doc.setEventType("SNAPSHOT_LIST");
         doc.setSnapshotId(snapshotId);
         doc.setTimestamp(System.currentTimeMillis());
@@ -101,6 +102,7 @@ public class SnapshotServiceImpl {
 
     private void finishSnapshot(String snapshotId, long startTime) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
+        doc.setMarketplace("getgems");
         doc.setEventType("SNAPSHOT_FINISH");
         doc.setSnapshotId(snapshotId);
         doc.setTimestamp(System.currentTimeMillis());

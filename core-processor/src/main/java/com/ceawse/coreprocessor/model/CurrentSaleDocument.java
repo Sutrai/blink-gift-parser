@@ -28,5 +28,8 @@ public class CurrentSaleDocument {
     private boolean isOffchain;
 
     @Indexed
+    private String marketplace;
+
+    @Indexed
     private String lastSnapshotId;
 }

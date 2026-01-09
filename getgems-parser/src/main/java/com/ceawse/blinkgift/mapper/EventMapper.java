@@ -9,6 +9,7 @@ public class EventMapper {
 
     public GiftHistoryDocument toEntity(GetGemsItemDto dto) {
         GiftHistoryDocument doc = new GiftHistoryDocument();
+        doc.setMarketplace("getgems");
 
         doc.setCollectionAddress(dto.getCollectionAddress());
         doc.setAddress(dto.getAddress());

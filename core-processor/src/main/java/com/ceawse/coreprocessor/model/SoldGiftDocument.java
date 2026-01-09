@@ -29,6 +29,9 @@ public class SoldGiftDocument {
     private String seller;
     private String buyer;
 
+    @Indexed
+    private String marketplace;
+
     private Instant soldAt;
 
     private boolean isOffchain;

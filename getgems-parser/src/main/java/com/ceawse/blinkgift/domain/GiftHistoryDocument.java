@@ -27,6 +27,9 @@ public class GiftHistoryDocument {
     private Long timestamp;
     private String eventType;
 
+    @Indexed
+    private String marketplace;
+
     private Boolean isOffchain;
 
     private String price;
