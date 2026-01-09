@@ -3,39 +3,28 @@ package com.ceawse.coreprocessor.controller;
 import com.ceawse.coreprocessor.dto.ErrorResponseDto;
 import com.ceawse.coreprocessor.exception.InformationException;
 import com.ceawse.coreprocessor.exception.ServiceException;
-import com.ceawse.coreprocessor.service.MessageService;
+import com.ceawse.coreprocessor.service.MessageProvider;
 import com.ceawse.coreprocessor.utils.ErrorResponseBuilder;
-import jakarta.persistence.EntityNotFoundException;
-import jakarta.persistence.NoResultException;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.nio.file.AccessDeniedException;
-
 @Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
-    private final MessageService messageService;
+    private final MessageProvider messageProvider;
     private final ErrorResponseBuilder errorResponseBuilder;
-    private final boolean enableStacktrace;
 
-    public GlobalExceptionHandler(
-            @Value("${server.error.include-stacktrace}") String includeStacktrace,
-            @Autowired MessageService messageService
-    ) {
-        this.enableStacktrace = "always".equals(includeStacktrace);
-        this.messageService = messageService;
-        this.errorResponseBuilder = new ErrorResponseBuilder(messageService);
-    }
+    @Value("${server.error.include-stacktrace:never}")
+    private String includeStacktraceMode;
 
     @ExceptionHandler(InformationException.class)
     public ResponseEntity<ErrorResponseDto> resolveInformationException(
@@ -44,24 +33,18 @@ public class GlobalExceptionHandler {
     ) {
         logRequestException(request, exception);
 
-        String description;
-        if (!StringUtils.hasLength(exception.getDescription())) {
-            description = messageService.getMessage("common.exception", exception.getMessage());
-        } else {
-            description = exception.getDescription();
-            if (description.startsWith("$")) {
-                description = messageService.getMessage(description.substring(1), exception.getMessage());
-            }
-        }
+        String description = resolveLocalizedDescription(exception.getDescription(), exception.getMessage());
+
+        boolean showStacktrace = shouldShowStacktrace();
 
         return new ResponseEntity<>(
                 ErrorResponseDto.builder()
                         .informative(true)
                         .level(exception.getLevel())
                         .message(description)
-                        .stacktrace(enableStacktrace ? exception.getStackTrace() : null)
+                        .stacktrace(showStacktrace ? exception.getStackTrace() : null)
                         .build(),
-                HttpStatus.INTERNAL_SERVER_ERROR
+                HttpStatus.BAD_REQUEST // InformationException обычно это ошибка валидации или логики (400), а не 500
         );
     }
 
@@ -72,36 +55,21 @@ public class GlobalExceptionHandler {
     ) {
         logRequestException(request, exception);
 
-        String description;
-        if (!StringUtils.hasLength(exception.getDescription())) {
-            description = messageService.getMessage("common.exception", exception.getMessage());
-        } else {
-            description = exception.getDescription();
-        }
+        String description = resolveLocalizedDescription(exception.getDescription(), exception.getMessage());
+        boolean showStacktrace = shouldShowStacktrace();
 
         return new ResponseEntity<>(
                 ErrorResponseDto.builder()
                         .informative(false)
                         .message(description)
-                        .stacktrace(enableStacktrace ? exception.getStackTrace() : null)
+                        .stacktrace(showStacktrace ? exception.getStackTrace() : null)
                         .build(),
                 HttpStatus.INTERNAL_SERVER_ERROR
         );
     }
 
-    @ExceptionHandler({ NoResultException.class, EmptyResultDataAccessException.class })
-    public ResponseEntity<ErrorResponseDto> resolveNoResult(HttpServletRequest request, Exception exception) {
-        logRequestException(request, exception);
-        return errorResponseBuilder.makeResponse("entity.empty.exception", exception);
-    }
-
-    @ExceptionHandler({ EntityNotFoundException.class })
-    public ResponseEntity<ErrorResponseDto> resolveEntityNotFound(HttpServletRequest request, Exception exception) {
-        logRequestException(request, exception);
-        return errorResponseBuilder.makeResponse("entity.not.found.exception", exception);
-    }
-
-    @ExceptionHandler(AccessDeniedException.class)
+    // Обработка Access Denied (общего типа)
+    @ExceptionHandler({SecurityException.class})
     public ResponseEntity<ErrorResponseDto> resolveAccessDeniedException(
             HttpServletRequest request,
             Exception exception
@@ -113,11 +81,25 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     protected ResponseEntity<ErrorResponseDto> resolveException(HttpServletRequest request, Exception exception) {
         logRequestException(request, exception);
-        return errorResponseBuilder.makeResponse("common.exception", exception);
+        return errorResponseBuilder.makeResponse("common.exception", HttpStatus.INTERNAL_SERVER_ERROR, exception, true);
+    }
+
+    private String resolveLocalizedDescription(String rawDescription, String fallbackMessage) {
+        if (!StringUtils.hasLength(rawDescription)) {
+            return messageProvider.getMessage("common.exception", fallbackMessage);
+        }
+        if (rawDescription.startsWith("$")) {
+            return messageProvider.getMessage(rawDescription.substring(1), fallbackMessage);
+        }
+        return rawDescription;
+    }
+
+    private boolean shouldShowStacktrace() {
+        return "always".equalsIgnoreCase(includeStacktraceMode);
     }
 
     private void logRequestException(HttpServletRequest request, Exception exception) {
-        log.debug("Unexpected exception processing request: " + request.getRequestURI());
-        log.error("Exception: ", exception);
+        log.error("Request: {} failed with exception: {}", request.getRequestURI(), exception.getMessage());
+        log.debug("Full stacktrace: ", exception);
     }
 }

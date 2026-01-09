@@ -22,19 +22,16 @@ public class UniqueGiftRepositoryImpl implements CustomUniqueGiftRepository {
     public void bulkUpsertFromRegistry(List<ItemRegistryDocument> items) {
         if (items.isEmpty()) return;
 
-        // Используем UNORDERED для скорости (ошибки в одном не стопают батч)
         BulkOperations bulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, UniqueGiftDocument.class);
 
         for (ItemRegistryDocument item : items) {
             Query query = new Query(Criteria.where("_id").is(item.getAddress()));
-
             Update update = new Update()
                     .set("name", item.getName())
                     .set("collectionAddress", item.getCollectionAddress())
-                    .set("isOffchain", false) // Из реестра всегда false
+                    .set("isOffchain", false)
                     .set("lastSeenAt", item.getLastSeenAt())
                     .set("discoverySource", "REGISTRY")
-                    // setOnInsert срабатывает только если записи не было
                     .setOnInsert("firstSeenAt", item.getMintedAt());
 
             bulkOps.upsert(query, update);
@@ -62,14 +59,11 @@ public class UniqueGiftRepositoryImpl implements CustomUniqueGiftRepository {
             if (event.getName() != null) update.set("name", event.getName());
             if (event.getCollectionAddress() != null) update.set("collectionAddress", event.getCollectionAddress());
 
-            // ЛОГИКА КОНФЛИКТА СТАТУСА:
-            boolean eventIsOffchain = Boolean.TRUE.equals(event.getIsOffchain());
-            if (!eventIsOffchain) {
-                // Если событие ончейн (например, минт) -> обновляем статус на false
+            // On-chain event always sets isOffchain=false.
+            // Off-chain event only sets true if record doesn't exist.
+            if (!Boolean.TRUE.equals(event.getIsOffchain())) {
                 update.set("isOffchain", false);
             } else {
-                // Если событие оффчейн -> ставим true ТОЛЬКО если записи еще нет.
-                // Нельзя перезаписать существующий false на true.
                 update.setOnInsert("isOffchain", true);
             }
 

@@ -3,7 +3,7 @@ package com.ceawse.coreprocessor.worker;
 import com.ceawse.coreprocessor.model.GiftHistoryDocument;
 import com.ceawse.coreprocessor.model.ProcessorState;
 import com.ceawse.coreprocessor.repository.ProcessorStateRepository;
-import com.ceawse.coreprocessor.service.MarketStateMachine;
+import com.ceawse.coreprocessor.service.MarketProcessor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
@@ -21,63 +21,75 @@ import java.util.List;
 public class ProcessorWorker {
 
     private final ProcessorStateRepository stateRepository;
-    private final MarketStateMachine stateMachine;
+    private final MarketProcessor marketProcessor;
     private final MongoTemplate mongoTemplate;
 
     private static final String PROCESSOR_ID = "MAIN_PROCESSOR";
-    private static final int BATCH_SIZE = 100;
+    private static final int BATCH_SIZE = 1000;
 
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelayString = "${app.worker.delay:1000}")
     public void processBatch() {
-        ProcessorState state = stateRepository.findById(PROCESSOR_ID)
-                .orElse(new ProcessorState(PROCESSOR_ID, 0L, null));
+        ProcessorState state = getOrInitState();
 
+        List<GiftHistoryDocument> events = fetchNextBatch(state);
+
+        if (events.isEmpty()) {
+            return;
+        }
+
+        log.debug("Processing batch of {} events. Start form: timestamp={}, id={}",
+                events.size(), state.getLastProcessedTimestamp(), state.getLastProcessedId());
+
+        long maxTime = state.getLastProcessedTimestamp();
+        String maxId = state.getLastProcessedId();
+        boolean stateUpdated = false;
+
+        for (GiftHistoryDocument event : events) {
+            try {
+                marketProcessor.processEvent(event);
+            } catch (Exception e) {
+                log.error("Error processing event ID={}: {}", event.getId(), e.getMessage(), e);
+            } finally {
+                maxTime = event.getTimestamp();
+                maxId = event.getId();
+                stateUpdated = true;
+            }
+        }
+
+        if (stateUpdated) {
+            updateState(state, maxTime, maxId);
+        }
+    }
+
+    private ProcessorState getOrInitState() {
+        return stateRepository.findById(PROCESSOR_ID)
+                .orElse(new ProcessorState(PROCESSOR_ID, 0L, null));
+    }
+
+    private void updateState(ProcessorState state, long timestamp, String id) {
+        state.setLastProcessedTimestamp(timestamp);
+        state.setLastProcessedId(id);
+        stateRepository.save(state);
+        log.info("Batch completed. New state: timestamp={}, id={}", timestamp, id);
+    }
+
+    private List<GiftHistoryDocument> fetchNextBatch(ProcessorState state) {
+        Query query = new Query();
         long lastTime = state.getLastProcessedTimestamp();
         String lastId = state.getLastProcessedId();
 
-        Query query = new Query();
         if (lastId != null) {
             query.addCriteria(new Criteria().orOperator(
                     Criteria.where("timestamp").gt(lastTime),
                     Criteria.where("timestamp").is(lastTime).and("id").gt(lastId)
             ));
         } else {
-            // Первый запуск или сброс
             query.addCriteria(Criteria.where("timestamp").gte(lastTime));
         }
 
         query.with(Sort.by(Sort.Direction.ASC, "timestamp", "id"));
         query.limit(BATCH_SIZE);
 
-        List<GiftHistoryDocument> events = mongoTemplate.find(query, GiftHistoryDocument.class);
-
-        if (events.isEmpty()) {
-            return;
-        }
-
-        log.debug("Processing batch of {} events...", events.size());
-
-        long maxTimeInBatch = lastTime;
-        String maxIdInBatch = lastId;
-        boolean stateChanged = false;
-
-        for (GiftHistoryDocument event : events) {
-            try {
-                stateMachine.applyEvent(event);
-            } catch (Exception e) {
-                log.error("SKIPPING EVENT ID={} due to processing error: {}", event.getId(), e.getMessage(), e);
-            } finally {
-                maxTimeInBatch = event.getTimestamp();
-                maxIdInBatch = event.getId();
-                stateChanged = true;
-            }
-        }
-
-        if (stateChanged) {
-            state.setLastProcessedTimestamp(maxTimeInBatch);
-            state.setLastProcessedId(maxIdInBatch);
-            stateRepository.save(state);
-            log.info("Batch processed. New state: time={}, id={}", maxTimeInBatch, maxIdInBatch);
-        }
+        return mongoTemplate.find(query, GiftHistoryDocument.class);
     }
 }

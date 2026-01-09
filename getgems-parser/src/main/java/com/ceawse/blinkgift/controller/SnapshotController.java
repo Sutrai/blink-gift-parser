@@ -1,6 +1,6 @@
 package com.ceawse.blinkgift.controller;
 
-import com.ceawse.blinkgift.service.impl.SnapshotServiceImpl;
+import com.ceawse.blinkgift.service.SnapshotService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class SnapshotController {
 
-    private final SnapshotServiceImpl snapshotService;
+    private final SnapshotService snapshotService;
 
     @PostMapping("/{marketplace}")
     public ResponseEntity<String> startSnapshot(@PathVariable String marketplace) {

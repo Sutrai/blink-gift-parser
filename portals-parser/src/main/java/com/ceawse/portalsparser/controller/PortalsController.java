@@ -1,6 +1,6 @@
 package com.ceawse.portalsparser.controller;
 
-import com.ceawse.portalsparser.service.PortalsSnapshotService;
+import com.ceawse.portalsparser.service.PortalsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -12,11 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class PortalsController {
 
-    private final PortalsSnapshotService snapshotService;
+    private final PortalsService portalsService;
 
     @PostMapping("/snapshot")
     public ResponseEntity<String> startSnapshot() {
-        snapshotService.runSnapshot();
+        portalsService.runSnapshot();
         return ResponseEntity.ok("Portals snapshot started");
     }
 }

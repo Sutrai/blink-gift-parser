@@ -1,17 +1,22 @@
 package com.ceawse.blinkgift.mapper;
 
 import com.ceawse.blinkgift.domain.GiftHistoryDocument;
+import com.ceawse.blinkgift.domain.UniqueGiftDocument;
 import com.ceawse.blinkgift.dto.GetGemsItemDto;
+import com.ceawse.blinkgift.dto.GetGemsSaleItemDto;
 import org.springframework.stereotype.Component;
+
+import java.math.BigDecimal;
+import java.time.Instant;
 
 @Component
 public class EventMapper {
 
-    public GiftHistoryDocument toEntity(GetGemsItemDto dto) {
-        GiftHistoryDocument doc = new GiftHistoryDocument();
-        // Явно устанавливаем маркетплейс
-        doc.setMarketplace("getgems");
+    private static final String MARKETPLACE_GETGEMS = "getgems";
 
+    public GiftHistoryDocument toHistoryEntity(GetGemsItemDto dto) {
+        GiftHistoryDocument doc = new GiftHistoryDocument();
+        doc.setMarketplace(MARKETPLACE_GETGEMS);
         doc.setCollectionAddress(dto.getCollectionAddress());
         doc.setAddress(dto.getAddress());
         doc.setName(dto.getName());
@@ -32,8 +37,62 @@ public class EventMapper {
         return doc;
     }
 
+    // Маппинг из снапшота (Snapshot List)
+    public GiftHistoryDocument toSnapshotEntity(GetGemsSaleItemDto item, String snapshotId) {
+        GiftHistoryDocument doc = new GiftHistoryDocument();
+        doc.setMarketplace(MARKETPLACE_GETGEMS);
+        doc.setEventType("SNAPSHOT_LIST");
+        doc.setSnapshotId(snapshotId);
+        doc.setTimestamp(System.currentTimeMillis());
+        doc.setAddress(item.getAddress());
+        doc.setCollectionAddress(item.getCollectionAddress());
+        doc.setName(item.getName());
+        doc.setIsOffchain(item.isOffchain());
+        doc.setHash(snapshotId + "_" + item.getAddress());
+
+        if (item.getSale() != null) {
+            String nano = item.getSale().getFullPrice();
+            doc.setPriceNano(nano);
+            doc.setPrice(fromNano(nano));
+            doc.setCurrency(item.getSale().getCurrency());
+            doc.setOldOwner(item.getOwnerAddress());
+        }
+        return doc;
+    }
+
+    // Маппинг уникального подарка
+    public UniqueGiftDocument toUniqueGiftEntity(GetGemsSaleItemDto item) {
+        UniqueGiftDocument.GiftAttributes.GiftAttributesBuilder attrsBuilder = UniqueGiftDocument.GiftAttributes.builder();
+        attrsBuilder.updatedAt(Instant.now());
+
+        if (item.getAttributes() != null) {
+            for (var attr : item.getAttributes()) {
+                if ("Model".equalsIgnoreCase(attr.getTraitType())) attrsBuilder.model(attr.getValue());
+                if ("Backdrop".equalsIgnoreCase(attr.getTraitType())) attrsBuilder.backdrop(attr.getValue());
+                if ("Symbol".equalsIgnoreCase(attr.getTraitType())) attrsBuilder.symbol(attr.getValue());
+            }
+        }
+
+        return UniqueGiftDocument.builder()
+                .id(item.getAddress())
+                .name(item.getName())
+                .collectionAddress(item.getCollectionAddress())
+                .isOffchain(item.isOffchain())
+                .attributes(attrsBuilder.build())
+                .lastSeenAt(Instant.now())
+                .build();
+    }
+
     private String normalizeEventType(String rawType) {
-        if (rawType == null) return "UNKNOWN";
-        return rawType.toLowerCase();
+        return rawType == null ? "UNKNOWN" : rawType.toLowerCase();
+    }
+
+    private String fromNano(String nano) {
+        if (nano == null) return "0";
+        try {
+            return new BigDecimal(nano).divide(BigDecimal.valueOf(1_000_000_000)).toPlainString();
+        } catch (Exception e) {
+            return "0";
+        }
     }
 }

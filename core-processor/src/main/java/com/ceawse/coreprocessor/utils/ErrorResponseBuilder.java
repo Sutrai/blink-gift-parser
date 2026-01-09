@@ -1,15 +1,17 @@
 package com.ceawse.coreprocessor.utils;
 
 import com.ceawse.coreprocessor.dto.ErrorResponseDto;
-import com.ceawse.coreprocessor.service.MessageService;
+import com.ceawse.coreprocessor.service.MessageProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
 
+@Service
 @RequiredArgsConstructor
 public class ErrorResponseBuilder {
 
-    private final MessageService messageService;
+    private final MessageProvider messageService;
 
     public ResponseEntity<ErrorResponseDto> makeResponse(String messageCode, Throwable cause) {
         return this.makeResponse(messageCode, HttpStatus.INTERNAL_SERVER_ERROR, cause, false);

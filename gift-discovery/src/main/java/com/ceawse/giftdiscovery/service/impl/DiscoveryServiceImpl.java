@@ -1,28 +1,31 @@
-package com.ceawse.giftdiscovery.worker;
+package com.ceawse.giftdiscovery.service.impl;
 
 import com.ceawse.giftdiscovery.model.GiftHistoryDocument;
 import com.ceawse.giftdiscovery.model.ItemRegistryDocument;
 import com.ceawse.giftdiscovery.model.ProcessorState;
 import com.ceawse.giftdiscovery.repository.ProcessorStateRepository;
 import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
+import com.ceawse.giftdiscovery.service.DiscoveryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BinaryOperator;
+import java.util.stream.Collectors;
 
 @Slf4j
-@Component
+@Service
 @RequiredArgsConstructor
-public class GiftDiscoveryWorker {
+public class DiscoveryServiceImpl implements DiscoveryService {
 
     private final UniqueGiftRepository uniqueGiftRepository;
     private final ProcessorStateRepository stateRepository;
@@ -32,18 +35,14 @@ public class GiftDiscoveryWorker {
     private static final String ID_REGISTRY = "DISCOVERY_REGISTRY";
     private static final String ID_HISTORY = "DISCOVERY_HISTORY";
 
-    // --- ПОТОК 1: REGISTRY (On-chain source) ---
-    @Scheduled(fixedDelay = 5000)
-    public void processRegistry() {
+    @Override
+    public void processRegistryStream() {
         ProcessorState state = getState(ID_REGISTRY);
-        // Используем lastProcessedTimestamp как курсор для lastSeenAt (или mintedAt)
-        // Для простоты привяжемся к lastSeenAt
         Instant lastTime = Instant.ofEpochMilli(state.getLastProcessedTimestamp());
 
-        Query query = new Query();
-        query.addCriteria(Criteria.where("lastSeenAt").gt(lastTime));
-        query.with(Sort.by(Sort.Direction.ASC, "lastSeenAt"));
-        query.limit(BATCH_SIZE);
+        Query query = new Query(Criteria.where("lastSeenAt").gt(lastTime))
+                .with(Sort.by(Sort.Direction.ASC, "lastSeenAt"))
+                .limit(BATCH_SIZE);
 
         List<ItemRegistryDocument> items = mongoTemplate.find(query, ItemRegistryDocument.class);
         if (items.isEmpty()) return;
@@ -53,45 +52,48 @@ public class GiftDiscoveryWorker {
 
         long maxTime = items.stream()
                 .mapToLong(i -> i.getLastSeenAt().toEpochMilli())
-                .max().orElse(state.getLastProcessedTimestamp());
+                .max()
+                .orElse(state.getLastProcessedTimestamp());
 
         saveState(state, maxTime);
     }
 
-    // --- ПОТОК 2: HISTORY (Off-chain & updates) ---
-    @Scheduled(fixedDelay = 2000)
-    public void processHistory() {
+    @Override
+    public void processHistoryStream() {
         ProcessorState state = getState(ID_HISTORY);
-        long lastTime = state.getLastProcessedTimestamp();
 
-        Query query = new Query();
-        query.addCriteria(Criteria.where("timestamp").gt(lastTime));
-        query.with(Sort.by(Sort.Direction.ASC, "timestamp"));
-        query.limit(BATCH_SIZE);
+        Query query = new Query(Criteria.where("timestamp").gt(state.getLastProcessedTimestamp()))
+                .with(Sort.by(Sort.Direction.ASC, "timestamp"))
+                .limit(BATCH_SIZE);
 
         List<GiftHistoryDocument> events = mongoTemplate.find(query, GiftHistoryDocument.class);
         if (events.isEmpty()) return;
 
         log.info("History Stream: Processing {} events...", events.size());
 
-        // Дедупликация в памяти: оставляем только последнее событие для каждого адреса в этом батче
-        Map<String, GiftHistoryDocument> uniqueBatch = new HashMap<>();
-        for (GiftHistoryDocument ev : events) {
-            if (ev.getAddress() == null) continue;
-            uniqueBatch.merge(ev.getAddress(), ev, (oldV, newV) ->
-                    newV.getTimestamp() > oldV.getTimestamp() ? newV : oldV
-            );
-        }
+        // Оптимизированная дедупликация
+        List<GiftHistoryDocument> uniqueEvents = deduplicateEvents(events);
 
-        uniqueGiftRepository.bulkUpsertFromHistory(uniqueBatch.values().stream().toList());
+        uniqueGiftRepository.bulkUpsertFromHistory(uniqueEvents);
 
-        long maxTime = events.get(events.size() - 1).getTimestamp();
+        long maxTime = events.getLast().getTimestamp();
         saveState(state, maxTime);
     }
 
+    private List<GiftHistoryDocument> deduplicateEvents(List<GiftHistoryDocument> events) {
+        // Оставляем только последнее событие для каждого адреса
+        Map<String, GiftHistoryDocument> map = new HashMap<>();
+        for (GiftHistoryDocument ev : events) {
+            if (ev.getAddress() != null) {
+                map.merge(ev.getAddress(), ev,
+                        (oldV, newV) -> newV.getTimestamp() > oldV.getTimestamp() ? newV : oldV);
+            }
+        }
+        return List.copyOf(map.values());
+    }
+
     private ProcessorState getState(String id) {
-        return stateRepository.findById(id)
-                .orElse(new ProcessorState(id, 0L, null));
+        return stateRepository.findById(id).orElse(new ProcessorState(id, 0L, null));
     }
 
     private void saveState(ProcessorState state, long timestamp) {
