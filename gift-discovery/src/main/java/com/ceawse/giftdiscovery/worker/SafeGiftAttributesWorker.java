@@ -1,23 +1,33 @@
 package com.ceawse.giftdiscovery.worker;
 
 import com.ceawse.giftdiscovery.client.GiftAttributesFeignClient;
+import com.ceawse.giftdiscovery.client.TelegramNftFeignClient;
 import com.ceawse.giftdiscovery.dto.GiftAttributesDto;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
-import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
+import com.ceawse.giftdiscovery.repository.UniqueGiftRepository; // Не используется напрямую, но пусть будет
+import feign.FeignException;
+import feign.codec.DecodeException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.time.Instant;
+import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
@@ -25,80 +35,128 @@ import java.util.concurrent.TimeUnit;
 public class SafeGiftAttributesWorker {
 
     private final MongoTemplate mongoTemplate;
-    private final GiftAttributesFeignClient getGemsApiClient;
+    private final GiftAttributesFeignClient fragmentApiClient;
+    private final TelegramNftFeignClient telegramApiClient;
 
-    private static final int BATCH_SIZE = 500;
-    private static final int THREAD_POOL_SIZE = 10;
+    // УВЕЛИЧИВАЕМ БАТЧ И ПОТОКИ
+    private static final int BATCH_SIZE = 1000; // Было 500
+    private static final int THREAD_POOL_SIZE = 40; // Было 10. Ставим 40-50, пока прокси держит.
 
-    @Scheduled(fixedDelay = 15000)
+    // Регулярки (без изменений)
+    private static final Pattern OG_DESC_PATTERN = Pattern.compile("<meta property=\"og:description\" content=\"([\\s\\S]*?)\">");
+    private static final Pattern ATTR_MODEL_PATTERN = Pattern.compile("Model:\\s*(.*?)(?:\\n|$)");
+    private static final Pattern ATTR_BACKDROP_PATTERN = Pattern.compile("Backdrop:\\s*(.*?)(?:\\n|$)");
+    private static final Pattern ATTR_SYMBOL_PATTERN = Pattern.compile("Symbol:\\s*(.*?)(?:\\n|$)");
+
+    // УМЕНЬШАЕМ ЗАДЕРЖКУ (fixedDelay)
+    // 1000 мс = 1 секунда отдыха между пачками. Было 15 сек.
+    @Scheduled(fixedDelay = 1000)
     public void updateGiftAttributesSafe() {
-        // ИЗМЕНЕНИЕ ЗДЕСЬ: Добавлено условие isOffchain = false
-        Query query = new Query(
-                Criteria.where("attributes").exists(false)
-                        .and("isOffchain").is(false)
-        );
+        Query query = new Query(Criteria.where("attributes").exists(false));
         query.limit(BATCH_SIZE);
-
         List<UniqueGiftDocument> gifts = mongoTemplate.find(query, UniqueGiftDocument.class);
+
         if (gifts.isEmpty()) return;
 
-        log.info("Processing {} ON-CHAIN gifts in safe mode...", gifts.size());
+        log.info("Processing {} gifts with {} threads...", gifts.size(), THREAD_POOL_SIZE);
 
         ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+
+        // Потокобезопасная очередь для сбора успешных результатов
+        ConcurrentLinkedQueue<UniqueGiftDocument> successUpdates = new ConcurrentLinkedQueue<>();
 
         for (UniqueGiftDocument gift : gifts) {
             executor.submit(() -> {
                 try {
-                    // Форматирование имени: "Witch Hat #17607" -> "WitchHat-17607"
-                    String formattedName = gift.getName().replace(" ", "").replace("#", "-");
+                    String slug = formatSlug(gift.getName());
+                    UniqueGiftDocument.GiftAttributes attributes;
 
-                    GiftAttributesDto attributesDto = getGemsApiClient.getAttributes(formattedName);
-
-                    if (attributesDto != null && attributesDto.getAttributes() != null) {
-                        List<GiftAttributesDto.AttributeDto> attrs = attributesDto.getAttributes();
-
-                        // Дополнительная защита, чтобы не упасть, если атрибутов меньше 3
-                        if (attrs.size() >= 3) {
-                            // ВАЖНО: Тут предполагается строгий порядок [Model, Backdrop, Symbol].
-                            // Если API вернет в другом порядке, данные перепутаются.
-                            // Лучше искать по trait_type, но для быстрого фикса оставил как у вас.
-
-                            UniqueGiftDocument.GiftAttributes ga = UniqueGiftDocument.GiftAttributes.builder()
-                                    .model(attrs.get(0).getValue())
-                                    .backdrop(attrs.get(1).getValue())
-                                    .symbol(attrs.get(2).getValue())
-                                    .updatedAt(Instant.now())
-                                    .build();
-
-                            Update update = new Update().set("attributes", ga);
-                            mongoTemplate.updateFirst(
-                                    Query.query(Criteria.where("_id").is(gift.getId())),
-                                    update,
-                                    UniqueGiftDocument.class
-                            );
-                        } else {
-                            log.warn("Gift {} returned incomplete attributes list (size: {})", gift.getName(), attrs.size());
-                        }
+                    if (Boolean.TRUE.equals(gift.isOffchain())) {
+                        String html = telegramApiClient.getNftPage(slug);
+                        attributes = parseAttributesFromHtml(html);
+                    } else {
+                        GiftAttributesDto dto = fragmentApiClient.getAttributes(slug);
+                        attributes = mapFragmentDtoToModel(dto);
                     }
 
+                    if (attributes != null) {
+                        gift.setAttributes(attributes); // Обновляем объект в памяти
+                        successUpdates.add(gift);       // Добавляем в очередь на сохранение
+                    }
+
+                } catch (DecodeException e) {
+                    log.error("Decode Error '{}': {}", gift.getName(), e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+                } catch (FeignException e) {
+                    log.warn("HTTP Error '{}': {}", gift.getName(), e.status());
                 } catch (Exception e) {
-                    // Логируем formattedName нет, но ID поможет найти проблему
-                    log.warn("Failed to update gift {}: {}", gift.getId(), e.getMessage());
+                    log.error("Error '{}': {}", gift.getName(), e.getMessage());
                 }
             });
         }
 
         executor.shutdown();
         try {
-            if (!executor.awaitTermination(30, TimeUnit.MINUTES)) {
-                executor.shutdownNow();
-            }
+            executor.awaitTermination(5, TimeUnit.MINUTES);
         } catch (InterruptedException e) {
-            log.error("Executor interrupted: {}", e.getMessage());
-            executor.shutdownNow();
             Thread.currentThread().interrupt();
         }
 
-        log.info("Finished batch processing of {} gifts.", gifts.size());
+        // --- BULK UPDATE В БАЗУ ДАННЫХ ---
+        if (!successUpdates.isEmpty()) {
+            BulkOperations bulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, UniqueGiftDocument.class);
+
+            for (UniqueGiftDocument updatedGift : successUpdates) {
+                Query q = new Query(Criteria.where("_id").is(updatedGift.getId()));
+                Update u = new Update().set("attributes", updatedGift.getAttributes());
+                bulkOps.updateOne(q, u);
+            }
+
+            var result = bulkOps.execute();
+            log.info("Batch finished. Updated in DB: {}", result.getModifiedCount());
+        } else {
+            log.info("Batch finished. No updates to save.");
+        }
+    }
+
+    // ... (Методы formatSlug, mapFragmentDtoToModel, parseAttributesFromHtml, extractValue остаются без изменений) ...
+    // Скопируйте их из предыдущего ответа, если нужно, или оставьте как есть.
+
+    private String formatSlug(String name) {
+        if (name == null) return "";
+        return name.replace(" ", "").replace("'", "").replace("’", "").replace("#", "-");
+    }
+
+    private UniqueGiftDocument.GiftAttributes mapFragmentDtoToModel(GiftAttributesDto dto) {
+        if (dto == null || dto.getAttributes() == null) return null;
+        // Безопасный доступ по индексам или стримам
+        var attrs = dto.getAttributes();
+        return UniqueGiftDocument.GiftAttributes.builder()
+                .model(attrs.size() > 0 ? attrs.get(0).getValue() : null)
+                .backdrop(attrs.size() > 1 ? attrs.get(1).getValue() : null)
+                .symbol(attrs.size() > 2 ? attrs.get(2).getValue() : null)
+                .updatedAt(Instant.now())
+                .build();
+    }
+
+    private UniqueGiftDocument.GiftAttributes parseAttributesFromHtml(String html) {
+        Matcher descMatcher = OG_DESC_PATTERN.matcher(html);
+        if (descMatcher.find()) {
+            String content = descMatcher.group(1);
+            String model = extractValue(content, ATTR_MODEL_PATTERN);
+            String backdrop = extractValue(content, ATTR_BACKDROP_PATTERN);
+            String symbol = extractValue(content, ATTR_SYMBOL_PATTERN);
+
+            if (model == null && backdrop == null && symbol == null) return null;
+
+            return UniqueGiftDocument.GiftAttributes.builder()
+                    .model(model).backdrop(backdrop).symbol(symbol)
+                    .updatedAt(Instant.now()).build();
+        }
+        return null;
+    }
+
+    private String extractValue(String text, Pattern pattern) {
+        Matcher matcher = pattern.matcher(text);
+        return matcher.find() ? matcher.group(1).trim() : null;
     }
 }
