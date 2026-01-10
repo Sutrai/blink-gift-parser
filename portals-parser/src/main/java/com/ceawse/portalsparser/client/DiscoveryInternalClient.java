@@ -4,9 +4,9 @@ import lombok.*;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-
 import java.math.BigDecimal;
 
+// УБРАЛИ configuration = GetGemsProxyConfig.class, если он там был
 @FeignClient(name = "discoveryInternalClient", url = "http://localhost:7781")
 public interface DiscoveryInternalClient {
 
@@ -17,7 +17,7 @@ public interface DiscoveryInternalClient {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    class EnrichmentRequest {
+    public class EnrichmentRequest { // Сделали PUBLIC
         private String giftName;
         private String collectionAddress;
         private String model;
@@ -29,7 +29,7 @@ public interface DiscoveryInternalClient {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    class EnrichmentResponse {
+    public class EnrichmentResponse { // Сделали PUBLIC
         private String resolvedCollectionAddress;
         private BigDecimal collectionFloorPrice;
         private BigDecimal estimatedPrice;

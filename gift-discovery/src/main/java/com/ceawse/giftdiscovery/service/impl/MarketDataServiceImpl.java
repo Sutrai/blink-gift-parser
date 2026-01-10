@@ -22,7 +22,6 @@ public class MarketDataServiceImpl implements MarketDataService {
 
     private final MongoTemplate mongoTemplate;
 
-    // Используем AtomicReference для безопасной замены карты целиком (Copy-On-Write pattern)
     private final AtomicReference<Map<String, String>> giftToCollectionMap = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, BigDecimal>> collectionFloorMap = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, MarketAttributeDataDto>> attributeDataMap = new AtomicReference<>(Map.of());
@@ -30,13 +29,10 @@ public class MarketDataServiceImpl implements MarketDataService {
     @Override
     public void refreshCache() {
         log.info("Starting market data cache refresh...");
-        long start = System.currentTimeMillis();
-
         refreshCollections();
         refreshStats();
         refreshAttributes();
-
-        log.info("Market data refreshed in {} ms.", System.currentTimeMillis() - start);
+        log.info("Market data refreshed.");
     }
 
     private void refreshCollections() {
@@ -44,7 +40,10 @@ public class MarketDataServiceImpl implements MarketDataService {
         Map<String, String> map = new HashMap<>(collections.size());
         for (var col : collections) {
             if (col.getName() != null) {
-                map.put(col.getName().trim().toLowerCase(), col.getAddress());
+                // Превращаем "Witch Hats" -> "witchhat", "Happy Brownies" -> "happybrownie"
+                String singularName = normalizeToSingular(col.getName());
+                map.put(singularName, col.getAddress());
+                log.debug("Mapped collection: '{}' -> {}", singularName, col.getAddress());
             }
         }
         giftToCollectionMap.set(map);
@@ -76,14 +75,25 @@ public class MarketDataServiceImpl implements MarketDataService {
         if (providedAddress != null && providedAddress.startsWith("EQ")) {
             return providedAddress;
         }
+
         if (giftName == null) return null;
 
-        String collectionName = giftName.split("#")[0].trim().toLowerCase();
-        return giftToCollectionMap.get().get(collectionName);
+        // "Witch Hat #52659" -> берем "Witch Hat" -> превращаем в "witchhat"
+        String rawName = giftName.split("#")[0].trim();
+        String singularSearchName = normalizeToSingular(rawName);
+
+        String resolved = giftToCollectionMap.get().get(singularSearchName);
+
+        if (resolved == null) {
+            log.warn("CANNOT RESOLVE: '{}' (normalized: '{}') not found in registry_collections", rawName, singularSearchName);
+        }
+
+        return resolved;
     }
 
     @Override
     public BigDecimal getCollectionFloor(String collectionAddress) {
+        if (collectionAddress == null) return BigDecimal.ZERO;
         return collectionFloorMap.get().getOrDefault(collectionAddress, BigDecimal.ZERO);
     }
 
@@ -92,5 +102,33 @@ public class MarketDataServiceImpl implements MarketDataService {
         if (collectionAddress == null || traitType == null || value == null) return null;
         String key = CollectionAttributeDocument.generateId(collectionAddress, traitType, value);
         return attributeDataMap.get().get(key);
+    }
+
+    /**
+     * Превращает названия в "сингулярный" вид для сопоставления.
+     * Примеры:
+     * "Witch Hats" -> "witchhat"
+     * "Witch Hat"  -> "witchhat"
+     * "Happy Brownies" -> "happybrownie"
+     * "Happy Brownie"  -> "happybrownie"
+     */
+    private String normalizeToSingular(String name) {
+        if (name == null) return "";
+
+        // 1. В нижний регистр и убираем пробелы/тире
+        String s = name.toLowerCase().replaceAll("[\\s\\-']", "");
+
+        // 2. Обработка окончаний (специфично для подарков Telegram)
+        if (s.endsWith("ies")) {
+            // Brownies -> brownie
+            return s.substring(0, s.length() - 3) + "y";
+        }
+        if (s.endsWith("s")) {
+            // Hats -> hat
+            // Исключение: если слово само по себе заканчивается на s (но в подарках таких почти нет)
+            return s.substring(0, s.length() - 1);
+        }
+
+        return s;
     }
 }
