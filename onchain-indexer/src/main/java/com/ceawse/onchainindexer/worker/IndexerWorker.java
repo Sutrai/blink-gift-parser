@@ -63,17 +63,27 @@ public class IndexerWorker {
 
     private void processSingleGift(com.ceawse.onchainindexer.dto.CollectionHistoryDto.HistoryItemDto dto, CollectionRegistryDocument col) {
         try {
-            // 1. Формируем SLUG для Fragment (Plush Pepe #2658 -> plushpepe-2658)
-            String slug = formatSlug(dto.getName());
+            // 1. ПРОВЕРКА: Если подарок уже есть в базе, просто выходим
+            if (uniqueGiftRepo.existsById(dto.getAddress())) {
+                log.debug("Gift {} already exists in database, skipping...", dto.getName());
+                return;
+            }
 
-            // 2. Получаем атрибуты из Fragment
+
+            // 2. Если подарка нет — только тогда идем во Fragment
+            log.info("New gift detected: {}. Fetching attributes from Fragment...", dto.getName());
+
+            String slug = formatSlug(dto.getName());
             FragmentMetadataDto metadata = fragmentClient.getMetadata(slug);
+
             String model = extractAttr(metadata, "Model");
             String backdrop = extractAttr(metadata, "Backdrop");
             String symbol = extractAttr(metadata, "Symbol");
 
-            // 3. Вызываем обогащение из модуля gift-discovery
+            // 3. Отправляем в Discovery для обогащения ценами и финального сохранения
             var enrichReq = InternalEnrichmentDto.Request.builder()
+                    .id(dto.getAddress())
+                    .timestamp(dto.getTimestamp())
                     .giftName(dto.getName())
                     .collectionAddress(col.getAddress())
                     .model(model)
@@ -81,41 +91,11 @@ public class IndexerWorker {
                     .symbol(symbol)
                     .build();
 
-            var enrichRes = discoveryClient.calculate(enrichReq);
-
-            // 4. Сохраняем в unique_gifts
-            UniqueGiftDocument gift = UniqueGiftDocument.builder()
-                    .id(dto.getAddress())
-                    .name(dto.getName())
-                    .collectionAddress(enrichRes.getResolvedCollectionAddress() != null ? enrichRes.getResolvedCollectionAddress() : col.getAddress())
-                    .isOffchain(false)
-                    .discoverySource("ONCHAIN_INDEXER")
-                    .firstSeenAt(Instant.ofEpochMilli(dto.getTimestamp()))
-                    .lastSeenAt(Instant.now())
-                    .attributes(UniqueGiftDocument.GiftAttributes.builder()
-                            .model(model)
-                            .modelPrice(enrichRes.getModelPrice())
-                            .modelRarityCount(enrichRes.getModelCount())
-                            .backdrop(backdrop)
-                            .backdropPrice(enrichRes.getBackdropPrice())
-                            .backdropRarityCount(enrichRes.getBackdropCount())
-                            .symbol(symbol)
-                            .symbolPrice(enrichRes.getSymbolPrice())
-                            .symbolRarityCount(enrichRes.getSymbolCount())
-                            .updatedAt(Instant.now())
-                            .build())
-                    .marketData(UniqueGiftDocument.MarketData.builder()
-                            .collectionFloorPrice(enrichRes.getCollectionFloorPrice())
-                            .estimatedPrice(enrichRes.getEstimatedPrice())
-                            .priceUpdatedAt(Instant.now())
-                            .build())
-                    .build();
-
-            uniqueGiftRepo.save(gift);
-            log.info("Successfully indexed and enriched gift: {}", dto.getName());
+            discoveryClient.calculate(enrichReq);
+            log.info("Sent new gift to discovery: {}", dto.getName());
 
         } catch (Exception e) {
-            log.warn("Failed to fully process gift {}: {}", dto.getName(), e.getMessage());
+            log.warn("Failed to process gift {}: {}", dto.getName(), e.getMessage());
         }
     }
 
