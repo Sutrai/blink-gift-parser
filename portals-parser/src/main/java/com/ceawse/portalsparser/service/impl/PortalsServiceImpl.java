@@ -4,14 +4,12 @@ import com.ceawse.portalsparser.client.DiscoveryInternalClient;
 import com.ceawse.portalsparser.client.PortalsApiClient;
 import com.ceawse.portalsparser.domain.PortalsGiftHistoryDocument;
 import com.ceawse.portalsparser.domain.PortalsIngestionState;
-import com.ceawse.portalsparser.domain.UniqueGiftDocument;
 import com.ceawse.portalsparser.dto.PortalsActionsResponseDto;
 import com.ceawse.portalsparser.dto.PortalsNftDto;
 import com.ceawse.portalsparser.dto.PortalsSearchResponseDto;
 import com.ceawse.portalsparser.mapper.PortalsMapper;
 import com.ceawse.portalsparser.repository.PortalsGiftHistoryRepository;
 import com.ceawse.portalsparser.repository.PortalsIngestionStateRepository;
-import com.ceawse.portalsparser.repository.PortalsUniqueGiftRepository;
 import com.ceawse.portalsparser.service.PortalsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +27,6 @@ public class PortalsServiceImpl implements PortalsService {
 
     private final PortalsApiClient apiClient;
     private final PortalsGiftHistoryRepository historyRepository;
-    private final PortalsUniqueGiftRepository uniqueGiftRepository;
     private final PortalsIngestionStateRepository stateRepository;
     private final PortalsMapper mapper;
     private final DiscoveryInternalClient discoveryClient;
@@ -47,6 +44,7 @@ public class PortalsServiceImpl implements PortalsService {
 
         try {
             while (true) {
+                // 1. Тянем страницу данных из API Portals
                 PortalsSearchResponseDto response = apiClient.searchNfts(
                         offset, limit, "price asc", "listed", true
                 );
@@ -57,21 +55,25 @@ public class PortalsServiceImpl implements PortalsService {
 
                 List<PortalsNftDto> items = response.getResults();
 
+                // 2. СОХРАНЯЕМ ИСТОРИЮ (это важно для графиков цен и аналитики)
+                // Это остается здесь, так как это специфичные данные маркетплейса
                 List<PortalsGiftHistoryDocument> events = items.stream()
                         .map(nft -> mapper.mapSnapshotToHistory(nft, snapshotId))
                         .toList();
                 historyRepository.saveAll(events);
 
-                // ОБОГАЩАЕМ КАЖДЫЙ NFT ПЕРЕД СОХРАНЕНИЕМ
-                items.stream()
-                        .filter(nft -> nft.getAttributes() != null && !nft.getAttributes().isEmpty())
-                        .forEach(this::processNft);
+                // 3. ОТПРАВЛЯЕМ ДАННЫЕ В GIFT-DISCOVERY
+                // Вместо того чтобы сохранять UniqueGiftDocument здесь, мы просим другой модуль сделать это
+                items.forEach(this::sendToDiscovery);
 
                 log.info("Portals Snapshot: processed {} items, offset {}", items.size(), offset);
                 offset += limit;
-                Thread.sleep(200);
+
+                // Небольшая задержка, чтобы не спамить API и Discovery
+                Thread.sleep(100);
             }
 
+            // Фиксируем окончание снапшота в истории
             historyRepository.save(mapper.createSnapshotFinishEvent(snapshotId, startTime));
             log.info("Portals Snapshot {} FINISHED.", snapshotId);
 
@@ -98,14 +100,16 @@ public class PortalsServiceImpl implements PortalsService {
                 long actionTime = parseTime(action.getCreatedAt());
                 if (actionTime <= lastProcessedTime) continue;
 
+                // Сохраняем событие (продажа/листинг) в историю
                 PortalsGiftHistoryDocument doc = mapper.mapActionToHistory(action, actionTime);
                 if (doc.getHash() != null && !historyRepository.existsByHash(doc.getHash())) {
                     historyRepository.save(doc);
                     savedCount++;
                 }
 
-                if (action.getNft() != null && action.getNft().getAttributes() != null) {
-                    processNft(action.getNft()); // ОБОГАЩАЕМ
+                // Если в событии есть данные о подарке — шлем в Discovery
+                if (action.getNft() != null) {
+                    sendToDiscovery(action.getNft());
                 }
 
                 if (actionTime > newMaxTime) newMaxTime = actionTime;
@@ -120,36 +124,39 @@ public class PortalsServiceImpl implements PortalsService {
         }
     }
 
-    private void processNft(PortalsNftDto nft) {
-        UniqueGiftDocument uniqueGift = mapper.mapToUniqueGift(nft);
+    /**
+     * Тот самый метод, который заменяет сохранение в локальную БД.
+     * Он просто берет сырые данные и кидает их в gift-discovery.
+     */
+    private void sendToDiscovery(PortalsNftDto nft) {
         try {
-            var attr = uniqueGift.getAttributes();
-            var enrichment = discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
-                    .giftName(uniqueGift.getName())
-                    .collectionAddress(uniqueGift.getCollectionAddress())
-                    .model(attr.getModel())
-                    .backdrop(attr.getBackdrop())
-                    .symbol(attr.getSymbol())
+            String model = null, backdrop = null, symbol = null;
+            if (nft.getAttributes() != null) {
+                for (var attr : nft.getAttributes()) {
+                    if ("model".equalsIgnoreCase(attr.getType())) model = attr.getValue();
+                    if ("backdrop".equalsIgnoreCase(attr.getType())) backdrop = attr.getValue();
+                    if ("symbol".equalsIgnoreCase(attr.getType())) symbol = attr.getValue();
+                }
+            }
+
+            String fullName = nft.getName();
+            if (nft.getExternalCollectionNumber() != null) {
+                fullName += " #" + nft.getExternalCollectionNumber();
+            }
+
+            discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
+                    .id(nft.getId()) // Адрес
+                    .giftName(fullName)
+                    .collectionAddress(nft.getCollectionId())
+                    .model(model)
+                    .backdrop(backdrop)
+                    .symbol(symbol)
+                    .timestamp(System.currentTimeMillis())
                     .build());
 
-            uniqueGift.setCollectionAddress(enrichment.getResolvedCollectionAddress());
-
-            attr.setModelPrice(enrichment.getModelPrice());
-            attr.setModelRarityCount(enrichment.getModelCount());
-            attr.setBackdropPrice(enrichment.getBackdropPrice());
-            attr.setBackdropRarityCount(enrichment.getBackdropCount());
-            attr.setSymbolPrice(enrichment.getSymbolPrice());
-            attr.setSymbolRarityCount(enrichment.getSymbolCount());
-
-            uniqueGift.setMarketData(UniqueGiftDocument.MarketData.builder()
-                    .collectionFloorPrice(enrichment.getCollectionFloorPrice())
-                    .estimatedPrice(enrichment.getEstimatedPrice())
-                    .priceUpdatedAt(Instant.now())
-                    .build());
         } catch (Exception e) {
-            log.warn("Enrichment failed for {}: {}", uniqueGift.getName(), e.getMessage());
+            log.warn("Failed to delegate discovery for {}: {}", nft.getName(), e.getMessage());
         }
-        uniqueGiftRepository.save(uniqueGift);
     }
 
     private long parseTime(String isoTime) {

@@ -4,40 +4,25 @@ import lombok.*;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import java.math.BigDecimal;
 
-// УБРАЛИ configuration = GetGemsProxyConfig.class, если он там был
 @FeignClient(name = "discoveryInternalClient", url = "http://localhost:7781")
 public interface DiscoveryInternalClient {
 
+    // Теперь метод ничего не возвращает (void / 202 Accepted)
     @PostMapping("/internal/v1/enrichment/calculate")
-    EnrichmentResponse enrich(@RequestBody EnrichmentRequest request);
+    void enrich(@RequestBody EnrichmentRequest request);
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public class EnrichmentRequest { // Сделали PUBLIC
+    public class EnrichmentRequest {
+        private String id;                // ID (адрес) подарка
+        private Long timestamp;           // Время события
         private String giftName;
         private String collectionAddress;
         private String model;
         private String backdrop;
         private String symbol;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public class EnrichmentResponse { // Сделали PUBLIC
-        private String resolvedCollectionAddress;
-        private BigDecimal collectionFloorPrice;
-        private BigDecimal estimatedPrice;
-        private BigDecimal modelPrice;
-        private Integer modelCount;
-        private BigDecimal backdropPrice;
-        private Integer backdropCount;
-        private BigDecimal symbolPrice;
-        private Integer symbolCount;
     }
 }
