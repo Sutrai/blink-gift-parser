@@ -10,14 +10,4 @@ import org.springframework.stereotype.Component;
 public class DiscoveryScheduler {
 
     private final DiscoveryService discoveryService;
-
-    @Scheduled(fixedDelay = 5000)
-    public void runRegistryProcessing() {
-        discoveryService.processRegistryStream();
-    }
-
-    @Scheduled(fixedDelay = 2000)
-    public void runHistoryProcessing() {
-        discoveryService.processHistoryStream();
-    }
 }

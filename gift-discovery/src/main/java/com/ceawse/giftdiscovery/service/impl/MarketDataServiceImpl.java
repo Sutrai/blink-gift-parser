@@ -72,23 +72,33 @@ public class MarketDataServiceImpl implements MarketDataService {
 
     @Override
     public String resolveCollectionAddress(String giftName, String providedAddress) {
-        if (providedAddress != null && providedAddress.startsWith("EQ")) {
+        // 1. Если передан TON-адрес (начинается с EQ) или UUID (содержит дефисы),
+        // возвращаем его как есть. Это позволит найти атрибуты по точному ID (UUID).
+        if (providedAddress != null && (providedAddress.startsWith("EQ") || isUuid(providedAddress))) {
             return providedAddress;
         }
 
+        // 2. Если адреса нет или это просто название, пытаемся найти маппинг по имени подарка
         if (giftName == null) return null;
 
-        // "Witch Hat #52659" -> берем "Witch Hat" -> превращаем в "witchhat"
         String rawName = giftName.split("#")[0].trim();
         String singularSearchName = normalizeToSingular(rawName);
 
         String resolved = giftToCollectionMap.get().get(singularSearchName);
 
         if (resolved == null) {
-            log.warn("CANNOT RESOLVE: '{}' (normalized: '{}') not found in registry_collections", rawName, singularSearchName);
+            // Если не нашли в маппинге, а providedAddress все же был передан (даже если он странный),
+            // попробуем использовать его как последний шанс
+            return providedAddress;
         }
 
         return resolved;
+    }
+
+    private boolean isUuid(String str) {
+        if (str == null) return false;
+        // UUID обычно имеет длину 36 символов и содержит дефисы
+        return str.length() == 36 && str.contains("-");
     }
 
     @Override

@@ -2,6 +2,8 @@ package com.ceawse.portalsparser.client;
 
 import com.ceawse.portalsparser.config.PortalsProxyConfig;
 import com.ceawse.portalsparser.dto.PortalsActionsResponseDto;
+import com.ceawse.portalsparser.dto.PortalsCollectionsResponseDto;
+import com.ceawse.portalsparser.dto.PortalsFiltersResponseDto;
 import com.ceawse.portalsparser.dto.PortalsSearchResponseDto;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,4 +33,10 @@ public interface PortalsApiClient {
             @RequestParam("status") String status,
             @RequestParam("exclude_bundled") boolean excludeBundled
     );
+
+    @GetMapping("/collections")
+    PortalsCollectionsResponseDto getCollections(@RequestParam("limit") int limit);
+
+    @GetMapping("/collections/filters")
+    PortalsFiltersResponseDto getFilters(@RequestParam("short_names") String shortNames);
 }
