@@ -33,6 +33,9 @@ public interface GetGemsApiClient {
             @RequestParam(value = "after", required = false) String cursor
     );
 
+    @GetMapping("/v1/nft/{address}")
+    GetGemsNftDetailDto getNftDetails(@PathVariable("address") String address);
+
     @GetMapping("/v1/collection/attributes/{collectionAddress}")
     GetGemsAttributesDto getAttributes(
             @PathVariable("collectionAddress") String collectionAddress

@@ -1,12 +1,11 @@
 package com.ceawse.blinkgift.service.impl;
 
+import com.ceawse.blinkgift.client.DiscoveryInternalClient;
 import com.ceawse.blinkgift.client.GetGemsApiClient;
 import com.ceawse.blinkgift.client.IndexerApiClient;
 import com.ceawse.blinkgift.domain.GiftHistoryDocument;
-import com.ceawse.blinkgift.domain.UniqueGiftDocument;
 import com.ceawse.blinkgift.dto.GetGemsSaleItemDto;
 import com.ceawse.blinkgift.mapper.EventMapper;
-import com.ceawse.blinkgift.repository.GetGemsUniqueGiftRepository;
 import com.ceawse.blinkgift.repository.GiftHistoryRepository;
 import com.ceawse.blinkgift.service.SnapshotService;
 import lombok.RequiredArgsConstructor;
@@ -25,24 +24,21 @@ public class SnapshotServiceImpl implements SnapshotService {
     private final IndexerApiClient indexerClient;
     private final GetGemsApiClient getGemsClient;
     private final GiftHistoryRepository historyRepository;
-    private final GetGemsUniqueGiftRepository uniqueGiftRepository;
     private final EventMapper eventMapper;
+    private final DiscoveryInternalClient discoveryClient;
 
     @Async
     @Override
     public void runSnapshot(String marketplace) {
         String snapshotId = UUID.randomUUID().toString();
         long startTime = System.currentTimeMillis();
-        log.info("Starting SNAPSHOT id={} for {} (Optimized for 15 Proxies)", snapshotId, marketplace);
+        log.info("Starting SNAPSHOT id={} for {}", snapshotId, marketplace);
 
         try {
             var collections = indexerClient.getCollections();
-            log.info("Found {} collections to scan", collections.size());
-
             for (var col : collections) {
                 processCollection(col.address, snapshotId);
             }
-
             finishSnapshot(snapshotId, startTime, marketplace);
         } catch (Exception e) {
             log.error("Snapshot FAILED", e);
@@ -52,7 +48,6 @@ public class SnapshotServiceImpl implements SnapshotService {
     private void processCollection(String collectionAddress, String snapshotId) {
         String cursor = null;
         boolean hasMore = true;
-        // Берем по 100 элементов (максимум API), чтобы минимизировать кол-во запросов
         int batchSize = 100;
 
         while (hasMore) {
@@ -67,28 +62,51 @@ public class SnapshotServiceImpl implements SnapshotService {
 
                 List<GetGemsSaleItemDto> items = response.getResponse().getItems();
 
+                // 1. Сохраняем в историю (SNAPSHOT_LIST)
                 List<GiftHistoryDocument> historyDocs = items.stream()
                         .filter(i -> i.getSale() != null)
                         .map(i -> eventMapper.toSnapshotEntity(i, snapshotId))
                         .toList();
-
-                List<UniqueGiftDocument> uniqueDocs = items.stream()
-                        .filter(i -> i.getAttributes() != null && !i.getAttributes().isEmpty())
-                        .map(eventMapper::toUniqueGiftEntity)
-                        .toList();
-
                 if (!historyDocs.isEmpty()) historyRepository.saveAll(historyDocs);
-                if (!uniqueDocs.isEmpty()) uniqueGiftRepository.saveAll(uniqueDocs);
+
+                // 2. Отправляем в Discovery
+                items.forEach(this::sendToDiscovery);
 
                 cursor = response.getResponse().getCursor();
                 if (cursor == null) hasMore = false;
 
-                Thread.sleep(20);
+                Thread.sleep(100);
 
             } catch (Exception e) {
                 log.error("Error processing collection {}: {}", collectionAddress, e.getMessage());
                 hasMore = false;
             }
+        }
+    }
+
+    private void sendToDiscovery(GetGemsSaleItemDto item) {
+        try {
+            String model = null, backdrop = null, symbol = null;
+            if (item.getAttributes() != null) {
+                for (var attr : item.getAttributes()) {
+                    if ("Model".equalsIgnoreCase(attr.getTraitType())) model = attr.getValue();
+                    if ("Backdrop".equalsIgnoreCase(attr.getTraitType())) backdrop = attr.getValue();
+                    if ("Symbol".equalsIgnoreCase(attr.getTraitType())) symbol = attr.getValue();
+                }
+            }
+
+            discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
+                    .id(item.getAddress())
+                    .giftName(item.getName())
+                    .collectionAddress(item.getCollectionAddress())
+                    .model(model)
+                    .backdrop(backdrop)
+                    .symbol(symbol)
+                    .timestamp(System.currentTimeMillis())
+                    .build());
+
+        } catch (Exception e) {
+            log.warn("Snapshot delegation failed for {}: {}", item.getName(), e.getMessage());
         }
     }
 
@@ -99,12 +117,11 @@ public class SnapshotServiceImpl implements SnapshotService {
         doc.setSnapshotId(snapshotId);
         doc.setTimestamp(System.currentTimeMillis());
         doc.setEventPayload(String.valueOf(startTime));
-        doc.setPriceNano("0");
         doc.setHash("FINISH_" + snapshotId);
         doc.setAddress("SYSTEM");
         doc.setCollectionAddress("SYSTEM");
 
         historyRepository.save(doc);
-        log.info("Snapshot {} FINISHED. Duration: {}ms", snapshotId, System.currentTimeMillis() - startTime);
+        log.info("Snapshot {} FINISHED.", snapshotId);
     }
 }
