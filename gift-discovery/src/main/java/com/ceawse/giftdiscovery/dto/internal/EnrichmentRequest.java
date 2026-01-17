@@ -10,10 +10,14 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class EnrichmentRequest {
-    private String id;           // Адрес подарка (ID в базе)
-    private Long timestamp;      // Время события (для firstSeenAt)
+    private String id;
     private String giftName;
     private String collectionAddress;
+    private Long timestamp;
+
+    private Integer serialNumber;
+    private Integer totalLimit;
+
     private String model;
     private String backdrop;
     private String symbol;

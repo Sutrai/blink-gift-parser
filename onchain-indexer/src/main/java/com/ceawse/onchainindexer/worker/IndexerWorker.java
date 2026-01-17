@@ -6,15 +6,14 @@ import com.ceawse.onchainindexer.client.RegistryApiClient;
 import com.ceawse.onchainindexer.dto.FragmentMetadataDto;
 import com.ceawse.onchainindexer.dto.InternalEnrichmentDto;
 import com.ceawse.onchainindexer.model.CollectionRegistryDocument;
-import com.ceawse.onchainindexer.model.UniqueGiftDocument;
 import com.ceawse.onchainindexer.repository.CollectionRegistryRepository;
 import com.ceawse.onchainindexer.repository.UniqueGiftRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
 import java.util.List;
 
 @Slf4j
@@ -31,7 +30,17 @@ public class IndexerWorker {
 
     private static final List<String> MINT_TYPE = List.of("mint");
 
-    @Scheduled(fixedDelay = 1000)
+    // Тот самый метод, который ты вызываешь из контроллера
+    @Async
+    public void runFullIndexing() {
+        log.info("Manual full indexing triggered...");
+        colRepo.findAll().stream()
+                .filter(CollectionRegistryDocument::isEnabled)
+                .forEach(this::processCollection);
+        log.info("Full indexing completed.");
+    }
+
+    @Scheduled(fixedDelay = 10000) // Фоновый скан каждые 10 сек
     public void indexNextBatch() {
         colRepo.findFirstByEnabledTrueOrderByLastScanTimestampAsc()
                 .ifPresent(this::processCollection);
@@ -63,15 +72,9 @@ public class IndexerWorker {
 
     private void processSingleGift(com.ceawse.onchainindexer.dto.CollectionHistoryDto.HistoryItemDto dto, CollectionRegistryDocument col) {
         try {
-            // 1. ПРОВЕРКА: Если подарок уже есть в базе, просто выходим
-            if (uniqueGiftRepo.existsById(dto.getAddress())) {
-                log.debug("Gift {} already exists in database, skipping...", dto.getName());
-                return;
-            }
+            if (uniqueGiftRepo.existsById(dto.getAddress())) return;
 
-
-            // 2. Если подарка нет — только тогда идем во Fragment
-            log.info("New gift detected: {}. Fetching attributes from Fragment...", dto.getName());
+            log.info("New gift: {}. Fetching attributes...", dto.getName());
 
             String slug = formatSlug(dto.getName());
             FragmentMetadataDto metadata = fragmentClient.getMetadata(slug);
@@ -80,19 +83,29 @@ public class IndexerWorker {
             String backdrop = extractAttr(metadata, "Backdrop");
             String symbol = extractAttr(metadata, "Symbol");
 
-            // 3. Отправляем в Discovery для обогащения ценами и финального сохранения
+            // --- ПАРСИМ НОМЕР ИЗ ИМЕНИ ---
+            Integer serial = null;
+            if (dto.getName() != null && dto.getName().contains("#")) {
+                try {
+                    serial = Integer.parseInt(dto.getName().split("#")[1].trim());
+                } catch (Exception e) {
+                    log.warn("Could not parse serial number from {}", dto.getName());
+                }
+            }
+
             var enrichReq = InternalEnrichmentDto.Request.builder()
                     .id(dto.getAddress())
                     .timestamp(dto.getTimestamp())
                     .giftName(dto.getName())
                     .collectionAddress(col.getAddress())
+                    .serialNumber(serial) // ПЕРЕДАЕМ НОМЕР
+                    .totalLimit(null)      // Можно будет добавить логику получения лимита коллекции
                     .model(model)
                     .backdrop(backdrop)
                     .symbol(symbol)
                     .build();
 
             discoveryClient.calculate(enrichReq);
-            log.info("Sent new gift to discovery: {}", dto.getName());
 
         } catch (Exception e) {
             log.warn("Failed to process gift {}: {}", dto.getName(), e.getMessage());

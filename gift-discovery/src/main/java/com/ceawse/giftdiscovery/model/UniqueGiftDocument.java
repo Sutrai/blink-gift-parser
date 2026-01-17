@@ -14,41 +14,38 @@ import java.time.Instant;
 @Document(collection = "unique_gifts")
 public class UniqueGiftDocument {
     @Id
-    private String id; // Address или Hash
-
-    @Indexed
+    private String id;
     private String name;
 
-    @Indexed
-    private String collectionAddress;
+    private Integer serialNumber;
+    private Integer totalLimit;
 
-    // БЫЛО: private boolean isOffchain;
-    // СТАЛО: Иcпользуем Boolean (обертку), чтобы избежать ошибки null
+    private String collectionAddress;
     private Boolean isOffchain;
 
-    private String discoverySource;
     private Instant firstSeenAt;
     private Instant lastSeenAt;
 
-    private GiftAttributes attributes;
+    // Структурированные параметры (как в твоем примере)
+    private GiftParameters parameters;
+
     private MarketData marketData;
 
     @Data
     @Builder
-    public static class GiftAttributes {
-        private String model;
-        private BigDecimal modelPrice;
-        private Integer modelRarityCount;
+    public static class GiftParameters {
+        private AttributeDetail model;
+        private AttributeDetail backdrop;
+        private AttributeDetail symbol;
+    }
 
-        private String backdrop;
-        private BigDecimal backdropPrice;
-        private Integer backdropRarityCount;
-
-        private String symbol;
-        private BigDecimal symbolPrice;
-        private Integer symbolRarityCount;
-
-        private Instant updatedAt;
+    @Data
+    @Builder
+    public static class AttributeDetail {
+        private String value;
+        private BigDecimal floorPrice;
+        private Integer rarityCount;
+        private Double rarityPercent; // Процент редкости
     }
 
     @Data
@@ -57,9 +54,5 @@ public class UniqueGiftDocument {
         private BigDecimal collectionFloorPrice;
         private BigDecimal estimatedPrice;
         private Instant priceUpdatedAt;
-    }
-
-    public boolean isOffchainSafe() {
-        return Boolean.TRUE.equals(isOffchain);
     }
 }

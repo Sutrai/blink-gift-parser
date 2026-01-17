@@ -32,16 +32,27 @@ public class SnapshotServiceImpl implements SnapshotService {
     public void runSnapshot(String marketplace) {
         String snapshotId = UUID.randomUUID().toString();
         long startTime = System.currentTimeMillis();
-        log.info("Starting SNAPSHOT id={} for {}", snapshotId, marketplace);
+        log.info(">>> [SNAPSHOT START] ID: {}, Marketplace: {}", snapshotId, marketplace);
 
         try {
-            var collections = indexerClient.getCollections();
+            // 1. Получаем список коллекций от Индексера
+            List<IndexerApiClient.CollectionDto> collections = indexerClient.getCollections();
+            if (collections == null || collections.isEmpty()) {
+                log.warn(">>> [SNAPSHOT ABORTED] No collections found from Indexer client.");
+                return;
+            }
+            log.info(">>> [SNAPSHOT PROGRESS] Found {} collections to process.", collections.size());
+
+            int processedCount = 0;
             for (var col : collections) {
+                processedCount++;
+                log.info(">>> [COLLECTION {}/{}] Processing: {}", processedCount, collections.size(), col.address);
                 processCollection(col.address, snapshotId);
             }
+
             finishSnapshot(snapshotId, startTime, marketplace);
         } catch (Exception e) {
-            log.error("Snapshot FAILED", e);
+            log.error(">>> [SNAPSHOT CRITICAL ERROR]", e);
         }
     }
 
@@ -49,37 +60,61 @@ public class SnapshotServiceImpl implements SnapshotService {
         String cursor = null;
         boolean hasMore = true;
         int batchSize = 100;
+        int totalItemsInCollection = 0;
 
         while (hasMore) {
             try {
+                log.debug("Fetching page (cursor: {}) for collection {}", cursor, collectionAddress);
                 var response = getGemsClient.getOnSale(collectionAddress, batchSize, cursor);
-                if (response == null || !response.isSuccess() ||
-                        response.getResponse().getItems() == null ||
-                        response.getResponse().getItems().isEmpty()) {
+
+                if (response == null || !response.isSuccess() || response.getResponse() == null) {
+                    log.error("Failed to get data for collection {}: Response is null or unsuccessful", collectionAddress);
+                    break;
+                }
+
+                List<GetGemsSaleItemDto> items = response.getResponse().getItems();
+                if (items == null || items.isEmpty()) {
+                    log.info("No more items for collection {}", collectionAddress);
                     hasMore = false;
                     continue;
                 }
 
-                List<GetGemsSaleItemDto> items = response.getResponse().getItems();
+                log.info("Fetched {} items for collection {}", items.size(), collectionAddress);
 
-                // 1. Сохраняем в историю (SNAPSHOT_LIST)
+                // 1. Сохраняем в историю
                 List<GiftHistoryDocument> historyDocs = items.stream()
                         .filter(i -> i.getSale() != null)
                         .map(i -> eventMapper.toSnapshotEntity(i, snapshotId))
                         .toList();
-                if (!historyDocs.isEmpty()) historyRepository.saveAll(historyDocs);
+
+                if (!historyDocs.isEmpty()) {
+                    historyRepository.saveAll(historyDocs);
+                    log.debug("Saved {} snapshot history records", historyDocs.size());
+                }
 
                 // 2. Отправляем в Discovery
-                items.forEach(this::sendToDiscovery);
+                int discoverySentCount = 0;
+                for (var item : items) {
+                    sendToDiscovery(item);
+                    discoverySentCount++;
+                }
+
+                totalItemsInCollection += items.size();
+                log.info("Collection {}: Processed {} items (Total so far: {})",
+                        collectionAddress, items.size(), totalItemsInCollection);
 
                 cursor = response.getResponse().getCursor();
-                if (cursor == null) hasMore = false;
+                if (cursor == null) {
+                    log.info("Finished collection {} - no more pages.", collectionAddress);
+                    hasMore = false;
+                }
 
-                Thread.sleep(100);
+                // Небольшая задержка, чтобы не спамить API
+                Thread.sleep(1000);
 
             } catch (Exception e) {
-                log.error("Error processing collection {}: {}", collectionAddress, e.getMessage());
-                hasMore = false;
+                log.error("Error in processCollection for {}: {}", collectionAddress, e.getMessage());
+                hasMore = false; // Прекращаем текущую коллекцию при ошибке
             }
         }
     }
@@ -95,6 +130,8 @@ public class SnapshotServiceImpl implements SnapshotService {
                 }
             }
 
+            log.debug("Sending to Discovery: {} (Address: {})", item.getName(), item.getAddress());
+
             discoveryClient.enrich(DiscoveryInternalClient.EnrichmentRequest.builder()
                     .id(item.getAddress())
                     .giftName(item.getName())
@@ -106,7 +143,7 @@ public class SnapshotServiceImpl implements SnapshotService {
                     .build());
 
         } catch (Exception e) {
-            log.warn("Snapshot delegation failed for {}: {}", item.getName(), e.getMessage());
+            log.warn("Discovery enrichment FAILED for {}: {}", item.getName(), e.getMessage());
         }
     }
 
@@ -122,6 +159,7 @@ public class SnapshotServiceImpl implements SnapshotService {
         doc.setCollectionAddress("SYSTEM");
 
         historyRepository.save(doc);
-        log.info("Snapshot {} FINISHED.", snapshotId);
+        long duration = (System.currentTimeMillis() - startTime) / 1000;
+        log.info(">>> [SNAPSHOT FINISHED] ID: {}. Duration: {} sec.", snapshotId, duration);
     }
 }

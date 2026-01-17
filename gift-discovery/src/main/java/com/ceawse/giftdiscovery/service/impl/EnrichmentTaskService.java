@@ -1,5 +1,6 @@
 package com.ceawse.giftdiscovery.service.impl;
 
+import com.ceawse.giftdiscovery.dto.MarketAttributeDataDto;
 import com.ceawse.giftdiscovery.dto.internal.EnrichmentRequest;
 import com.ceawse.giftdiscovery.model.UniqueGiftDocument;
 import com.ceawse.giftdiscovery.repository.UniqueGiftRepository;
@@ -21,65 +22,74 @@ public class EnrichmentTaskService {
     private final MarketDataService marketDataService;
     private final UniqueGiftRepository uniqueGiftRepository;
 
-    @Async("virtualThreadExecutor") // Используем виртуальные потоки из твоего AsyncConfig
+    @Async("virtualThreadExecutor")
     public void processEnrichmentAsync(EnrichmentRequest request) {
         try {
-            log.debug("Starting async enrichment for: {}", request.getGiftName());
-
-            // 1. Определяем реальный адрес коллекции
             String colAddr = marketDataService.resolveCollectionAddress(request.getGiftName(), request.getCollectionAddress());
+            BigDecimal colFloor = marketDataService.getCollectionFloor(colAddr);
 
-            // 2. Получаем рыночные данные (флор и атрибуты)
-            BigDecimal floor = marketDataService.getCollectionFloor(colAddr);
-            if (floor == null) floor = BigDecimal.ZERO;
+            // Получаем данные по атрибутам
+            var mData = marketDataService.getAttributeData(colAddr, "Model", request.getModel());
+            var bData = marketDataService.getAttributeData(colAddr, "Backdrop", request.getBackdrop());
+            var sData = marketDataService.getAttributeData(colAddr, "Symbol", request.getSymbol());
 
-            var modelData = marketDataService.getAttributeData(colAddr, "Model", request.getModel());
-            var backdropData = marketDataService.getAttributeData(colAddr, "Backdrop", request.getBackdrop());
-            var symbolData = marketDataService.getAttributeData(colAddr, "Symbol", request.getSymbol());
+            // Собираем детализированные объекты атрибутов
+            var parameters = UniqueGiftDocument.GiftParameters.builder()
+                    .model(buildDetail(request.getModel(), mData, request.getTotalLimit()))
+                    .backdrop(buildDetail(request.getBackdrop(), bData, request.getTotalLimit()))
+                    .symbol(buildDetail(request.getSymbol(), sData, request.getTotalLimit()))
+                    .build();
 
-            // 3. Считаем оценку
-            BigDecimal modelP = (modelData != null && modelData.getPrice() != null) ? modelData.getPrice() : floor;
-            BigDecimal backdropP = (backdropData != null && backdropData.getPrice() != null) ? backdropData.getPrice() : floor;
+            // Расчет оценки (упрощенная формула)
+            BigDecimal estPrice = calculateEstimatedPrice(colFloor, parameters);
 
-            BigDecimal estimated = floor.multiply(BigDecimal.valueOf(2))
-                    .add(modelP)
-                    .add(backdropP)
-                    .divide(BigDecimal.valueOf(4), 2, RoundingMode.HALF_UP);
-
-            // 4. Формируем документ UniqueGiftDocument
             UniqueGiftDocument gift = UniqueGiftDocument.builder()
                     .id(request.getId())
                     .name(request.getGiftName())
+                    .serialNumber(request.getSerialNumber())
+                    .totalLimit(request.getTotalLimit())
                     .collectionAddress(colAddr)
                     .isOffchain(false)
-                    .discoverySource("ONCHAIN_INDEXER")
-                    .firstSeenAt(request.getTimestamp() != null ? Instant.ofEpochMilli(request.getTimestamp()) : Instant.now())
+                    .firstSeenAt(Instant.ofEpochMilli(request.getTimestamp()))
                     .lastSeenAt(Instant.now())
-                    .attributes(UniqueGiftDocument.GiftAttributes.builder()
-                            .model(request.getModel())
-                            .modelPrice(modelData != null ? modelData.getPrice() : null)
-                            .modelRarityCount(modelData != null ? modelData.getCount() : null)
-                            .backdrop(request.getBackdrop())
-                            .backdropPrice(backdropData != null ? backdropData.getPrice() : null)
-                            .backdropRarityCount(backdropData != null ? backdropData.getCount() : null)
-                            .symbol(request.getSymbol())
-                            .symbolPrice(symbolData != null ? symbolData.getPrice() : null)
-                            .symbolRarityCount(symbolData != null ? symbolData.getCount() : null)
-                            .updatedAt(Instant.now())
-                            .build())
+                    .parameters(parameters)
                     .marketData(UniqueGiftDocument.MarketData.builder()
-                            .collectionFloorPrice(floor)
-                            .estimatedPrice(estimated)
+                            .collectionFloorPrice(colFloor)
+                            .estimatedPrice(estPrice)
                             .priceUpdatedAt(Instant.now())
                             .build())
                     .build();
 
-            // 5. Сохраняем в MongoDB
             uniqueGiftRepository.save(gift);
-            log.info("Successfully enriched and saved gift: {}", request.getGiftName());
+            log.info("Enriched gift saved: {}", request.getGiftName());
 
         } catch (Exception e) {
-            log.error("Failed to process async enrichment for gift: {}", request.getGiftName(), e);
+            log.error("Enrichment failed for: {}", request.getGiftName(), e);
         }
+    }
+
+    private UniqueGiftDocument.AttributeDetail buildDetail(String value, MarketAttributeDataDto data, Integer total) {
+        if (value == null) return null;
+
+        Integer count = (data != null) ? data.getCount() : 0;
+        // Считаем процент редкости: (количество / всего в коллекции) * 100
+        Double percent = (total != null && total > 0) ? (count.doubleValue() / total.doubleValue()) * 100 : 0.0;
+
+        return UniqueGiftDocument.AttributeDetail.builder()
+                .value(value)
+                .floorPrice((data != null) ? data.getPrice() : null)
+                .rarityCount(count)
+                .rarityPercent(BigDecimal.valueOf(percent).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .build();
+    }
+
+    private BigDecimal calculateEstimatedPrice(BigDecimal floor, UniqueGiftDocument.GiftParameters params) {
+        if (floor == null) return BigDecimal.ZERO;
+
+        BigDecimal mPrice = (params.getModel().getFloorPrice() != null) ? params.getModel().getFloorPrice() : floor;
+        BigDecimal bPrice = (params.getBackdrop().getFloorPrice() != null) ? params.getBackdrop().getFloorPrice() : floor;
+
+        return floor.multiply(BigDecimal.valueOf(2)).add(mPrice).add(bPrice)
+                .divide(BigDecimal.valueOf(4), 2, RoundingMode.HALF_UP);
     }
 }

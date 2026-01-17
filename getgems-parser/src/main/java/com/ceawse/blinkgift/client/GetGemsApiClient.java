@@ -1,6 +1,6 @@
 package com.ceawse.blinkgift.client;
 
-import com.ceawse.blinkgift.config.GetGemsProxyConfig;
+import com.ceawse.blinkgift.config.GetGemsSpecificConfig;
 import com.ceawse.blinkgift.dto.*;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,7 +12,7 @@ import java.util.List;
 @FeignClient(
         name = "getGemsClient",
         url = "https://api.getgems.io/public-api",
-        configuration = GetGemsProxyConfig.class
+        configuration = GetGemsSpecificConfig.class
 )
 public interface GetGemsApiClient {
 
